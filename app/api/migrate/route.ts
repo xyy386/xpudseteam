@@ -2,13 +2,11 @@ import { env } from "cloudflare:workers";
 import { isSiteEditor } from "../../editor-auth";
 import originalContent from "../../migration-content.json";
 import migration from "../../migration-media.json";
+import bundledMedia from "../../migration-media-bytes.json";
 
 export const dynamic = "force-dynamic";
 
-type ExpectedMedia = (typeof migration.media)[number];
-
 const contentData = JSON.stringify(originalContent);
-const expectedMedia = new Map<string, ExpectedMedia>(migration.media.map((item) => [item.key, item]));
 
 async function sha256(value: ArrayBuffer | Uint8Array): Promise<string> {
   const bytes = value instanceof Uint8Array ? value : new Uint8Array(value);
@@ -64,23 +62,15 @@ export async function POST(request: Request) {
     if (await sha256(new TextEncoder().encode(contentData)) !== migration.content_sha256) {
       return Response.json({ error: "页面内容校验失败" }, { status: 500 });
     }
-    const form = await request.formData();
-    const files = form.getAll("media");
-    if (files.length !== migration.media.length || files.some((file) => !(file instanceof File))) {
-      return Response.json({ error: "请选择完整的 7 张原始图片" }, { status: 400 });
-    }
-
-    const incoming = new Map<string, { bytes: ArrayBuffer; item: ExpectedMedia }>();
-    for (const file of files as File[]) {
-      const item = expectedMedia.get(file.name);
-      if (!item || incoming.has(file.name) || file.size !== item.size_bytes) {
-        return Response.json({ error: `图片清单不匹配：${file.name}` }, { status: 400 });
+    const incoming = new Map<string, Uint8Array>();
+    for (const item of migration.media) {
+      const encoded = bundledMedia[item.key as keyof typeof bundledMedia];
+      if (!encoded) return Response.json({ error: `站点包中缺少图片：${item.key}` }, { status: 500 });
+      const bytes = Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0));
+      if (bytes.byteLength !== item.size_bytes || await sha256(bytes) !== item.sha256) {
+        return Response.json({ error: `站点包中图片校验失败：${item.key}` }, { status: 500 });
       }
-      const bytes = await file.arrayBuffer();
-      if (await sha256(bytes) !== item.sha256) {
-        return Response.json({ error: `图片校验失败：${file.name}` }, { status: 400 });
-      }
-      incoming.set(file.name, { bytes, item });
+      incoming.set(item.key, bytes);
     }
 
     const row = await env.DB!.prepare("SELECT data, updated_at FROM site_content WHERE id = 1").first<{ data: string; updated_at: string }>();
@@ -97,7 +87,7 @@ export async function POST(request: Request) {
 
     for (const item of migration.media) {
       if (await env.BUCKET!.head(item.key)) continue;
-      await env.BUCKET!.put(item.key, incoming.get(item.key)!.bytes, {
+      await env.BUCKET!.put(item.key, incoming.get(item.key)!, {
         httpMetadata: { contentType: item.content_type },
       });
     }

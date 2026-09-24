@@ -25,7 +25,7 @@ export async function POST(request: Request) {
       return Response.json({ error: "内容格式不正确" }, { status: 400 });
     }
     const stored = await getSiteContent();
-    if (content.revision !== stored.revision) return Response.json({ error: "网站内容已在其他页面更新。请保留当前文字，刷新编辑器后再合并修改。" }, { status: 409 });
+    if (content.revision !== stored.revision) return Response.json({ error: "网站内容已被其他成员更新，请核对合并结果。", current: stored }, { status: 409 });
     if (!Array.isArray(content.customSections)) content.customSections = stored.customSections;
     if (typeof content.hero.featureTargetSlug !== "string") content.hero.featureTargetSlug = stored.hero.featureTargetSlug;
     if (typeof content.hero.featureArticleId !== "string") content.hero.featureArticleId = stored.hero.featureArticleId;
@@ -41,7 +41,7 @@ export async function POST(request: Request) {
     const result = stored.revision
       ? await env.DB.prepare("UPDATE site_content SET data = ?, updated_at = ? WHERE id = 1 AND updated_at = ?").bind(JSON.stringify(content), revision, stored.revision).run()
       : await env.DB.prepare("INSERT INTO site_content (id, data, updated_at) VALUES (1, ?, ?) ON CONFLICT(id) DO NOTHING").bind(JSON.stringify(content), revision).run();
-    if (!result.meta.changes) return Response.json({ error: "网站内容刚被其他页面更新。请保留当前文字，刷新编辑器后再合并修改。" }, { status: 409 });
+    if (!result.meta.changes) return Response.json({ error: "网站内容刚被其他成员更新，请核对合并结果。", current: await getSiteContent() }, { status: 409 });
     return Response.json({ ok: true, revision });
   } catch (error) {
     console.error("Save site content failed", error);

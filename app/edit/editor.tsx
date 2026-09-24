@@ -7,6 +7,7 @@ import { MarkdownInline, MarkdownText } from "../markdown";
 import { LivePreview } from "./live-preview";
 import { PhotoComposer } from "./photo-composer";
 import { importNewsFile } from "./news-import";
+import { conflictPreview, mergeSiteContent, type ConflictChoices, type MergeConflict } from "./three-way-merge";
 
 type Path = Array<string | number>;
 
@@ -52,7 +53,7 @@ function SizeControl({ label, value, min, max, step = 1, unit = "px", onChange }
   </div></label>;
 }
 
-function Editor({ initial }: { initial: SiteContent }) {
+function Editor({ initial, role, email }: { initial: SiteContent; role: "owner" | "member"; email: string }) {
   const [content, setContent] = useState<SiteContent>(initial);
   const contentRef = useRef(initial);
   const savedRef = useRef(JSON.stringify(initial));
@@ -69,6 +70,16 @@ function Editor({ initial }: { initial: SiteContent }) {
   const [activeItemIndex, setActiveItemIndex] = useState<number | null>(null);
   const [previewFocusPath, setPreviewFocusPath] = useState("");
   const [importingArticleId, setImportingArticleId] = useState("");
+  const [pendingMerge, setPendingMerge] = useState<{ base: SiteContent; mine: SiteContent; theirs: SiteContent; conflicts: MergeConflict[] } | null>(null);
+  const [conflictChoices, setConflictChoices] = useState<ConflictChoices>({});
+  const [recovery, setRecovery] = useState<{ base: SiteContent; mine: SiteContent } | null>(null);
+
+  useEffect(() => {
+    try {
+      const draft = sessionStorage.getItem("research-site-editor-conflict-draft");
+      if (draft) setRecovery(JSON.parse(draft) as { base: SiteContent; mine: SiteContent });
+    } catch { sessionStorage.removeItem("research-site-editor-conflict-draft"); }
+  }, []);
 
   useEffect(() => {
     function warnBeforeLeaving(event: BeforeUnloadEvent) {
@@ -252,6 +263,7 @@ function Editor({ initial }: { initial: SiteContent }) {
   }
 
   async function save() {
+    if (pendingMerge) return;
     const incomplete = contentRef.current.archives.flatMap((archive, archiveIndex) => (archive.slug === "events" || archive.slug === "updates")
       ? archive.newsArticles.map((article, articleIndex) => ({ article, archiveIndex, articleIndex })).filter(({ article }) => article.id !== "original-events-material" && (!article.title.trim() || !article.date || !article.attachment)) : [])[0];
     if (incomplete) {
@@ -267,7 +279,23 @@ function Editor({ initial }: { initial: SiteContent }) {
       const response = await fetch("/api/site-content", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: snapshot,
       });
-      const result = await response.json() as { error?: string; revision?: string };
+      const result = await response.json() as { error?: string; revision?: string; current?: SiteContent };
+      if (response.status === 409 && result.current) {
+        const base = JSON.parse(savedRef.current) as SiteContent;
+        const mine = JSON.parse(snapshot) as SiteContent;
+        const theirs = result.current;
+        sessionStorage.setItem("research-site-editor-conflict-draft", JSON.stringify({ base, mine }));
+        const outcome = mergeSiteContent(base, mine, theirs);
+        if (outcome.conflicts.length) {
+          setPendingMerge({ base, mine, theirs, conflicts: outcome.conflicts });
+          setConflictChoices({});
+          setStatus(`发现 ${outcome.conflicts.length} 处同时修改，请选择要保留的版本。您的修改已暂存于本浏览器。`);
+        } else {
+          applyMerged(outcome.merged, theirs);
+          setStatus("已自动合并不同位置的修改，请再次点击保存。");
+        }
+        return;
+      }
       if (!response.ok) throw new Error(result.error ?? "保存失败");
       const saved = { ...(JSON.parse(snapshot) as SiteContent), revision: result.revision ?? contentRef.current.revision };
       savedRef.current = JSON.stringify(saved);
@@ -276,11 +304,37 @@ function Editor({ initial }: { initial: SiteContent }) {
       const hasChanges = JSON.stringify(contentRef.current) !== savedRef.current;
       setDirty(hasChanges);
       setStatus(hasChanges ? "已保存刚才的内容；还有新的修改待保存" : "已保存。刷新网站即可查看最新内容。");
+      sessionStorage.removeItem("research-site-editor-conflict-draft");
+      setRecovery(null);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "保存失败，请重试");
     } finally {
       setBusy(false);
     }
+  }
+
+  function applyMerged(merged: SiteContent, theirs: SiteContent) {
+    undoRef.current.push(contentRef.current);
+    redoRef.current = [];
+    contentRef.current = merged;
+    savedRef.current = JSON.stringify(theirs);
+    setContent(merged);
+    setDirty(JSON.stringify(merged) !== savedRef.current);
+    setHistory({ undo: true, redo: false });
+    setPendingMerge(null);
+  }
+
+  function restoreConflictDraft() {
+    if (!recovery) return;
+    const outcome = mergeSiteContent(recovery.base, recovery.mine, contentRef.current);
+    if (outcome.conflicts.length) {
+      setPendingMerge({ ...recovery, theirs: contentRef.current, conflicts: outcome.conflicts });
+      setConflictChoices({});
+    } else {
+      applyMerged(outcome.merged, contentRef.current);
+      setStatus("草稿已恢复并合并，请检查后保存。");
+    }
+    setRecovery(null);
   }
 
   async function importArticle(file: File, archiveIndex: number, articleIndex: number) {
@@ -352,8 +406,9 @@ function Editor({ initial }: { initial: SiteContent }) {
   </>;
 
   return <main className="editor-page">
-    <div className="editor-top"><div><p className="editor-eyebrow">SITE EDITOR / 在线编辑</p><h1>编辑科研团队网站</h1><p>边改边看效果；确认后点击“保存全部修改”，网站页面刷新后就会更新。</p></div><a href="/" target="_blank" rel="noopener noreferrer">打开网站 ↗</a></div>
+    <div className="editor-top"><div><p className="editor-eyebrow">SITE EDITOR / 在线编辑</p><h1>编辑科研团队网站</h1><p>边改边看效果；确认后点击“保存全部修改”，网站页面刷新后就会更新。</p></div><div className="editor-account-links"><span>{email}</span><a href="/" target="_blank" rel="noopener noreferrer">打开网站 ↗</a>{role === "owner" ? <a href="/editor-members">管理临时成员</a> : <><a href="/editor-account">修改密码</a><button type="button" onClick={async () => { await fetch("/api/editor-session", { method: "DELETE" }); window.location.assign("/editor-login"); }}>退出登录</button></>}</div></div>
     <div className="editor-sticky"><span role="status" className={dirty ? "is-dirty" : ""}>{status || "修改将保存在在线网站"}</span><div className="editor-sticky-actions"><button type="button" className="editor-history" onClick={() => restore("undo")} disabled={!history.undo} title="撤销上一步修改">撤销</button><button type="button" className="editor-history" onClick={() => restore("redo")} disabled={!history.redo} title="恢复已撤销的修改">重做</button><button type="button" onClick={() => void save()} disabled={busy || !dirty}>{busy ? "保存中…" : dirty ? "保存全部修改" : "已保存"}</button></div></div>
+    {recovery && <div className="editor-recovery" role="status">发现上次保存冲突时暂存的草稿。<button type="button" onClick={restoreConflictDraft}>恢复并核对</button><button type="button" onClick={() => { sessionStorage.removeItem("research-site-editor-conflict-draft"); setRecovery(null); }}>放弃草稿</button></div>}
     <nav className="editor-jump" aria-label="快速定位编辑栏目">{[["home", "首页"], ["appearance", "字体与图片"], ["members", "团队成员"], ["directions", "研究方向"], ["outcomes", "研究成果"], ["news", "团队动态"], ["news-posts", "新闻稿"], ["other", "其他"], ["custom", "自定义栏目"], ["contact", "联系我们"], ["sections", "栏目与底图"], ["pages", "详情页文字"]].map(([key, label]) => <button type="button" key={key} onClick={() => { if (key === "outcomes" || key === "news" || key === "other") { jump("archives"); setPreviewView(key); } else if (key === "custom" && content.customSections.length) { jump("custom", 0); } else { jump(key); } }}>{label}</button>)}</nav>
     <div className="editor-workspace">
     <LivePreview content={content} view={previewView} activeItemIndex={activeItemIndex} focusPath={previewFocusPath} onViewChange={(view) => { setPreviewView(view); setActiveItemIndex(null); setPreviewFocusPath(""); }} onEdit={jump} onEditSubsection={jumpToSubsection} onAddCustomSection={() => addCustomSection()} mobile={mobileMode} onModeChange={setMobileMode} />
@@ -538,6 +593,15 @@ function Editor({ initial }: { initial: SiteContent }) {
       </div></details>
     </div>
     </div>
+    {pendingMerge && <div className="editor-merge-overlay"><section className="editor-merge-dialog" role="dialog" aria-modal="true" aria-labelledby="merge-heading">
+      <h2 id="merge-heading">核对同时修改的内容</h2>
+      <p>其他成员已先保存。未冲突的修改会自动合并；以下位置请逐项选择。您的草稿已暂存，关闭页面后仍可恢复。</p>
+      <div className="editor-merge-items">{pendingMerge.conflicts.map((conflict) => <fieldset key={conflict.path}><legend>{conflict.path || "网站内容"}</legend>
+        <label><input type="radio" name={`conflict-${conflict.path}`} checked={(conflictChoices[conflict.path] || "mine") === "mine"} onChange={() => setConflictChoices({ ...conflictChoices, [conflict.path]: "mine" })} /><span>保留我的修改</span><small>{conflictPreview(conflict.mine)}</small></label>
+        <label><input type="radio" name={`conflict-${conflict.path}`} checked={conflictChoices[conflict.path] === "theirs"} onChange={() => setConflictChoices({ ...conflictChoices, [conflict.path]: "theirs" })} /><span>采用已保存版本</span><small>{conflictPreview(conflict.theirs)}</small></label>
+      </fieldset>)}</div>
+      <div className="editor-merge-actions"><button type="button" onClick={() => { const outcome = mergeSiteContent(pendingMerge.base, pendingMerge.mine, pendingMerge.theirs, conflictChoices); applyMerged(outcome.merged, pendingMerge.theirs); setStatus("冲突已合并，请检查预览并再次点击保存。"); }}>应用选择并继续编辑</button><button type="button" onClick={() => { setPendingMerge(null); setStatus("草稿仍保存在本浏览器。可继续编辑，稍后恢复并合并。"); }}>稍后处理</button></div>
+    </section></div>}
   </main>;
 }
 

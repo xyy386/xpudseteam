@@ -8,6 +8,13 @@
       "when": 1790178894025,
       "tag": "0000_workable_echo",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1790258879951,
+      "tag": "0001_steep_blindfold",
+      "breakpoints": true
     }
   ]
 }

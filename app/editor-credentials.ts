@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { getChatGPTUser } from "./chatgpt-auth";
 
 export const SESSION_COOKIE = "research_editor_session";
+export const MEMBER_MODE_COOKIE = "research_editor_mode";
 // The production Workers runtime supports at most 100,000 PBKDF2 iterations.
 const PASSWORD_ITERATIONS = 100_000;
 const SESSION_LIFETIME = 12 * 60 * 60 * 1000;
@@ -86,25 +87,36 @@ export function clearSessionCookie(request: Request): string {
   return sessionCookie("", request, 0);
 }
 
+export function memberModeCookie(request: Request, maxAge = 30 * 24 * 60 * 60): string {
+  const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
+  return `${MEMBER_MODE_COOKIE}=${maxAge ? "member" : ""}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`;
+}
+
 export async function getEditorIdentity(): Promise<EditorIdentity | null> {
+  const cookieStore = await cookies();
+  const token = cookieStore.get(SESSION_COOKIE)?.value;
+  if (cookieStore.get(MEMBER_MODE_COOKIE)?.value === "member" || token !== undefined) {
+    // A member session selects the member role, even when ChatGPT is also signed in.
+    // An expired or revoked session must not silently fall back to owner privileges.
+    if (!token || !/^[A-Za-z0-9_-]{40,80}$/.test(token)) return null;
+    const tokenHash = await sha256(token);
+    const now = Date.now();
+    try {
+      const row = await database().prepare(`SELECT a.id, a.email, a.expires_at
+        FROM editor_sessions s JOIN editor_accounts a ON a.id = s.account_id
+        WHERE s.token_hash = ? AND s.expires_at > ? AND a.expires_at > ? AND a.revoked_at IS NULL`).bind(tokenHash, now, now).first<{ id: string; email: string; expires_at: number }>();
+      return row ? { role: "member", id: row.id, email: row.email, expiresAt: row.expires_at } : null;
+    } catch (error) {
+      console.error("Editor identity lookup failed", error);
+      return null;
+    }
+  }
   const chatgpt = await getChatGPTUser();
   const ownerEmail = env.SITE_EDITOR_EMAIL?.trim().toLowerCase();
   if (chatgpt && (ownerEmail ? chatgpt.email.toLowerCase() === ownerEmail : import.meta.env.DEV && chatgpt.email === "seedy@sites.test")) {
     return { role: "owner", email: chatgpt.email, id: chatgpt.userId };
   }
-  const token = (await cookies()).get(SESSION_COOKIE)?.value;
-  if (!token || !/^[A-Za-z0-9_-]{40,80}$/.test(token)) return null;
-  const tokenHash = await sha256(token);
-  const now = Date.now();
-  try {
-    const row = await database().prepare(`SELECT a.id, a.email, a.expires_at
-      FROM editor_sessions s JOIN editor_accounts a ON a.id = s.account_id
-      WHERE s.token_hash = ? AND s.expires_at > ? AND a.expires_at > ? AND a.revoked_at IS NULL`).bind(tokenHash, now, now).first<{ id: string; email: string; expires_at: number }>();
-    return row ? { role: "member", id: row.id, email: row.email, expiresAt: row.expires_at } : null;
-  } catch (error) {
-    console.error("Editor identity lookup failed", error);
-    return null;
-  }
+  return null;
 }
 
 export async function isSiteOwner(): Promise<boolean> {

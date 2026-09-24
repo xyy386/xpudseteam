@@ -256,7 +256,7 @@ function Editor({ initial }: { initial: SiteContent }) {
       savedRef.current = snapshot;
       const hasChanges = JSON.stringify(contentRef.current) !== snapshot;
       setDirty(hasChanges);
-      setStatus(hasChanges ? "已保存刚才的内容；还有新的修改待保存" : "已保存。网站预览刷新后即可查看最新内容。");
+      setStatus(hasChanges ? "已保存刚才的内容；还有新的修改待保存" : "已保存。刷新网站即可查看最新内容。");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "保存失败，请重试");
     } finally {
@@ -306,8 +306,8 @@ function Editor({ initial }: { initial: SiteContent }) {
   </>;
 
   return <main className="editor-page">
-    <div className="editor-top"><div><p className="editor-eyebrow">SITE EDITOR / 本地预览</p><h1>编辑科研团队网站</h1><p>边改边看效果；确认后点击“保存全部修改”，网站页面刷新后就会更新。</p></div><a href="/" target="_blank" rel="noopener noreferrer">打开网站 ↗</a></div>
-    <div className="editor-sticky"><span role="status" className={dirty ? "is-dirty" : ""}>{status || "修改将保存在本地站点资料库"}</span><div className="editor-sticky-actions"><button type="button" className="editor-history" onClick={() => restore("undo")} disabled={!history.undo} title="撤销上一步修改">撤销</button><button type="button" className="editor-history" onClick={() => restore("redo")} disabled={!history.redo} title="恢复已撤销的修改">重做</button><button type="button" onClick={() => void save()} disabled={busy || !dirty}>{busy ? "保存中…" : dirty ? "保存全部修改" : "已保存"}</button></div></div>
+    <div className="editor-top"><div><p className="editor-eyebrow">SITE EDITOR / 在线编辑</p><h1>编辑科研团队网站</h1><p>边改边看效果；确认后点击“保存全部修改”，网站页面刷新后就会更新。</p></div><a href="/" target="_blank" rel="noopener noreferrer">打开网站 ↗</a></div>
+    <div className="editor-sticky"><span role="status" className={dirty ? "is-dirty" : ""}>{status || "修改将保存在在线网站"}</span><div className="editor-sticky-actions"><button type="button" className="editor-history" onClick={() => restore("undo")} disabled={!history.undo} title="撤销上一步修改">撤销</button><button type="button" className="editor-history" onClick={() => restore("redo")} disabled={!history.redo} title="恢复已撤销的修改">重做</button><button type="button" onClick={() => void save()} disabled={busy || !dirty}>{busy ? "保存中…" : dirty ? "保存全部修改" : "已保存"}</button></div></div>
     <nav className="editor-jump" aria-label="快速定位编辑栏目">{[["home", "首页"], ["appearance", "字体与图片"], ["members", "团队成员"], ["directions", "研究方向"], ["archives", "成果、动态与其他"], ["custom", "自定义栏目"], ["contact", "联系我们"], ["sections", "栏目与底图"], ["pages", "详情页文字"]].map(([key, label]) => <button type="button" key={key} onClick={() => jump(key)}>{label}</button>)}</nav>
     <div className="editor-workspace">
     <LivePreview content={content} view={previewView} activeItemIndex={activeItemIndex} focusPath={previewFocusPath} onViewChange={(view) => { setPreviewView(view); setActiveItemIndex(null); setPreviewFocusPath(""); }} onEdit={jump} onEditSubsection={jumpToSubsection} onAddCustomSection={() => addCustomSection()} mobile={mobileMode} onModeChange={setMobileMode} />

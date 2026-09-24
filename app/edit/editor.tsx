@@ -53,7 +53,8 @@ function SizeControl({ label, value, min, max, step = 1, unit = "px", onChange }
   </div></label>;
 }
 
-function Editor({ initial, role, email }: { initial: SiteContent; role: "owner" | "member"; email: string }) {
+function Editor({ initial, role, email, accountId }: { initial: SiteContent; role: "owner" | "member"; email: string; accountId: string }) {
+  const draftKey = `research-site-editor-conflict-draft:${role}:${accountId}`;
   const [content, setContent] = useState<SiteContent>(initial);
   const contentRef = useRef(initial);
   const savedRef = useRef(JSON.stringify(initial));
@@ -75,11 +76,12 @@ function Editor({ initial, role, email }: { initial: SiteContent; role: "owner" 
   const [recovery, setRecovery] = useState<{ base: SiteContent; mine: SiteContent } | null>(null);
 
   useEffect(() => {
+    setRecovery(null);
     try {
-      const draft = sessionStorage.getItem("research-site-editor-conflict-draft");
+      const draft = sessionStorage.getItem(draftKey);
       if (draft) setRecovery(JSON.parse(draft) as { base: SiteContent; mine: SiteContent });
-    } catch { sessionStorage.removeItem("research-site-editor-conflict-draft"); }
-  }, []);
+    } catch { sessionStorage.removeItem(draftKey); }
+  }, [draftKey]);
 
   useEffect(() => {
     function warnBeforeLeaving(event: BeforeUnloadEvent) {
@@ -282,9 +284,9 @@ function Editor({ initial, role, email }: { initial: SiteContent; role: "owner" 
       const result = await response.json() as { error?: string; revision?: string; current?: SiteContent };
       if (response.status === 409 && result.current) {
         const base = JSON.parse(savedRef.current) as SiteContent;
-        const mine = JSON.parse(snapshot) as SiteContent;
+        const mine = structuredClone(contentRef.current);
         const theirs = result.current;
-        sessionStorage.setItem("research-site-editor-conflict-draft", JSON.stringify({ base, mine }));
+        try { sessionStorage.setItem(draftKey, JSON.stringify({ base, mine })); } catch { /* Continue merging when browser storage is unavailable. */ }
         const outcome = mergeSiteContent(base, mine, theirs);
         if (outcome.conflicts.length) {
           setPendingMerge({ base, mine, theirs, conflicts: outcome.conflicts });
@@ -304,7 +306,7 @@ function Editor({ initial, role, email }: { initial: SiteContent; role: "owner" 
       const hasChanges = JSON.stringify(contentRef.current) !== savedRef.current;
       setDirty(hasChanges);
       setStatus(hasChanges ? "已保存刚才的内容；还有新的修改待保存" : "已保存。刷新网站即可查看最新内容。");
-      sessionStorage.removeItem("research-site-editor-conflict-draft");
+      sessionStorage.removeItem(draftKey);
       setRecovery(null);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "保存失败，请重试");
@@ -408,7 +410,7 @@ function Editor({ initial, role, email }: { initial: SiteContent; role: "owner" 
   return <main className="editor-page">
     <div className="editor-top"><div><p className="editor-eyebrow">SITE EDITOR / 在线编辑</p><h1>编辑科研团队网站</h1><p>边改边看效果；确认后点击“保存全部修改”，网站页面刷新后就会更新。</p></div><div className="editor-account-links"><span>{email}</span><a href="/" target="_blank" rel="noopener noreferrer">打开网站 ↗</a>{role === "owner" ? <a href="/editor-members">管理临时成员</a> : <><a href="/editor-account">修改密码</a><button type="button" onClick={async () => { await fetch("/api/editor-session", { method: "DELETE" }); window.location.assign("/editor-login"); }}>退出登录</button></>}</div></div>
     <div className="editor-sticky"><span role="status" className={dirty ? "is-dirty" : ""}>{status || "修改将保存在在线网站"}</span><div className="editor-sticky-actions"><button type="button" className="editor-history" onClick={() => restore("undo")} disabled={!history.undo} title="撤销上一步修改">撤销</button><button type="button" className="editor-history" onClick={() => restore("redo")} disabled={!history.redo} title="恢复已撤销的修改">重做</button><button type="button" onClick={() => void save()} disabled={busy || !dirty}>{busy ? "保存中…" : dirty ? "保存全部修改" : "已保存"}</button></div></div>
-    {recovery && <div className="editor-recovery" role="status">发现上次保存冲突时暂存的草稿。<button type="button" onClick={restoreConflictDraft}>恢复并核对</button><button type="button" onClick={() => { sessionStorage.removeItem("research-site-editor-conflict-draft"); setRecovery(null); }}>放弃草稿</button></div>}
+    {recovery && <div className="editor-recovery" role="status">发现上次保存冲突时暂存的草稿。<button type="button" onClick={restoreConflictDraft}>恢复并核对</button><button type="button" onClick={() => { sessionStorage.removeItem(draftKey); setRecovery(null); }}>放弃草稿</button></div>}
     <nav className="editor-jump" aria-label="快速定位编辑栏目">{[["home", "首页"], ["appearance", "字体与图片"], ["members", "团队成员"], ["directions", "研究方向"], ["outcomes", "研究成果"], ["news", "团队动态"], ["news-posts", "新闻稿"], ["other", "其他"], ["custom", "自定义栏目"], ["contact", "联系我们"], ["sections", "栏目与底图"], ["pages", "详情页文字"]].map(([key, label]) => <button type="button" key={key} onClick={() => { if (key === "outcomes" || key === "news" || key === "other") { jump("archives"); setPreviewView(key); } else if (key === "custom" && content.customSections.length) { jump("custom", 0); } else { jump(key); } }}>{label}</button>)}</nav>
     <div className="editor-workspace">
     <LivePreview content={content} view={previewView} activeItemIndex={activeItemIndex} focusPath={previewFocusPath} onViewChange={(view) => { setPreviewView(view); setActiveItemIndex(null); setPreviewFocusPath(""); }} onEdit={jump} onEditSubsection={jumpToSubsection} onAddCustomSection={() => addCustomSection()} mobile={mobileMode} onModeChange={setMobileMode} />

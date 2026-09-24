@@ -14,7 +14,7 @@ export function SiteHeader({ content, active = "home" }: { content: SiteContent;
     <nav className="main-nav" aria-label="主导航">
       {links.map(([slug, label]) => <a href={`/${slug}`} aria-current={active === slug ? "page" : undefined} key={slug}><MarkdownInline source={label} /></a>)}
       {content.customSections.map((section) => <a href={`/custom/${section.id}`} aria-current={active === `custom-${section.id}` ? "page" : undefined} key={section.id}><MarkdownInline source={section.title} /></a>)}
-      <a href="/#contact">联系我们</a><a href="/edit">编辑网站</a>
+      <a href="/#contact">联系我们</a><a href="/editor-login">编辑网站</a>
     </nav>
   </div></header>;
 }

@@ -10,9 +10,10 @@ export default async function EditorLoginPage() {
     <a href="/" className="editor-auth-home">← 返回网站</a>
     <p className="editor-eyebrow">SITE EDITOR</p>
     <h1>登录网站编辑器</h1>
-    {identity ? <p>当前已登录为 {identity.email}。<a href="/edit">进入编辑器 →</a></p> : <>
+    {identity?.role === "member" ? <p>当前已登录为 {identity.email}。<a href="/edit">进入编辑器 →</a></p> : <>
       <LoginForm />
-      <p className="editor-auth-owner">网站管理员可使用 <a href={chatGPTSignInPath("/edit")} target="_top">ChatGPT 管理员身份登录</a>。</p>
+      {identity?.role === "owner" ? <p className="editor-auth-owner">您的 ChatGPT 管理员身份已验证。<a href="/edit">以管理员身份继续 →</a> 此入口也可用于恢复管理权限。</p>
+        : <p className="editor-auth-owner">网站管理员可通过 <a href={chatGPTSignInPath("/edit")} target="_top">ChatGPT 身份验证</a>进入管理后台，或恢复管理权限。团队成员请使用上方网站密码。</p>}
     </>}
   </section></main>;
 }

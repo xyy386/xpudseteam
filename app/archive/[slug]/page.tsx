@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getSiteContent } from "../../content";
 import { appearanceStyle } from "../../appearance";
@@ -16,12 +15,12 @@ export default async function ArchivePage({ params }: { params: Promise<{ slug: 
     <main className="archive-page site-page" style={appearanceStyle(content.appearance, content.appearanceMobile)}>
       <header className="site-header">
         <div className="container header-inner">
-          <Link className="brand" href="/"><span className="brand-monogram">数研</span><span><strong>{content.siteName}</strong><small>{content.institution}</small></span></Link>
-          <nav className="main-nav" aria-label="主导航"><Link href="/#team">团队成员</Link><Link href="/#research">研究方向</Link><Link href="/#outcomes">研究成果</Link><Link href="/#news">团队动态</Link><Link href="/#other">其他</Link>{content.customSections.map((item) => <Link href={`/#custom-${item.id}`} key={item.id}><MarkdownInline source={item.title} /></Link>)}<Link href="/#contact">联系我们</Link><Link href="/edit">编辑网站</Link></nav>
+          <a className="brand" href="/"><span className="brand-monogram">数研</span><span><strong>{content.siteName}</strong><small>{content.institution}</small></span></a>
+          <nav className="main-nav" aria-label="主导航"><a href="/#team">团队成员</a><a href="/#research">研究方向</a><a href="/#outcomes">研究成果</a><a href="/#news">团队动态</a><a href="/#other">其他</a>{content.customSections.map((item) => <a href={`/#custom-${item.id}`} key={item.id}><MarkdownInline source={item.title} /></a>)}<a href="/#contact">联系我们</a><a href="/edit">编辑网站</a></nav>
         </div>
       </header>
       <section className="archive-hero"><div className="container">
-        <Link className="back-link" href={`/#${section.homeAnchor}`}>← 返回{section.group}</Link>
+        <a className="back-link" href={`/#${section.homeAnchor}`}>← 返回{section.group}</a>
         <p className="archive-eyebrow">{section.group} / <MarkdownInline source={section.english} /></p>
         <h1><MarkdownInline source={section.title} /></h1>
         <MarkdownText source={section.description} className="archive-intro" />
@@ -41,7 +40,7 @@ export default async function ArchivePage({ params }: { params: Promise<{ slug: 
 
       <section className="site-section archive-more-section"><div className="container">
         <div className="section-heading"><div className="section-heading-line"><span>{section.subsections.length ? "04" : "03"}</span><h2><MarkdownInline source={content.pageText.moreTitle} /></h2><small>EXPLORE</small></div></div>
-        <div className="archive-more">{content.archives.filter((item) => item.slug !== slug).map((item) => <Link href={`/archive/${item.slug}`} key={item.slug}><span>{item.group}</span><strong><MarkdownInline source={item.title} /></strong><b aria-hidden="true">↗</b></Link>)}</div>
+        <div className="archive-more">{content.archives.filter((item) => item.slug !== slug).map((item) => <a href={`/archive/${item.slug}`} key={item.slug}><span>{item.group}</span><strong><MarkdownInline source={item.title} /></strong><b aria-hidden="true">↗</b></a>)}</div>
       </div></section>
 
       <footer><div className="container footer-inner"><div><strong><MarkdownInline source={content.siteName} /></strong><p><MarkdownInline source={content.institution} /></p></div></div></footer>

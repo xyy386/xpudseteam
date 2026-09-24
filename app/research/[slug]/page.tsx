@@ -1,5 +1,4 @@
 import { notFound } from "next/navigation";
-import Link from "next/link";
 import { getSiteContent } from "../../content";
 import { appearanceStyle } from "../../appearance";
 import { MarkdownInline, MarkdownText } from "../../markdown";
@@ -17,13 +16,13 @@ export default async function ResearchDetail({ params }: { params: Promise<{ slu
     <main className="detail-page site-page" style={appearanceStyle(content.appearance, content.appearanceMobile)}>
       <header className="site-header">
         <div className="container header-inner">
-          <Link className="brand" href="/"><span className="brand-monogram">数研</span><span><strong>{content.siteName}</strong><small>{content.institution}</small></span></Link>
-          <nav className="main-nav" aria-label="主导航"><Link href="/#team">团队成员</Link><Link href="/#research">研究方向</Link><Link href="/#outcomes">研究成果</Link><Link href="/#news">团队动态</Link><Link href="/#other">其他</Link>{content.customSections.map((section) => <Link href={`/#custom-${section.id}`} key={section.id}><MarkdownInline source={section.title} /></Link>)}<Link href="/#contact">联系我们</Link><Link href="/edit">编辑网站</Link></nav>
+          <a className="brand" href="/"><span className="brand-monogram">数研</span><span><strong>{content.siteName}</strong><small>{content.institution}</small></span></a>
+          <nav className="main-nav" aria-label="主导航"><a href="/#team">团队成员</a><a href="/#research">研究方向</a><a href="/#outcomes">研究成果</a><a href="/#news">团队动态</a><a href="/#other">其他</a>{content.customSections.map((section) => <a href={`/#custom-${section.id}`} key={section.id}><MarkdownInline source={section.title} /></a>)}<a href="/#contact">联系我们</a><a href="/edit">编辑网站</a></nav>
         </div>
       </header>
       <div className="detail-hero">
         <div className="container">
-          <Link className="back-link" href="/#research">← 返回研究方向</Link>
+          <a className="back-link" href="/#research">← 返回研究方向</a>
           <div className="detail-hero-grid">
             <div>
               <span className="detail-index">RESEARCH {String(index + 1).padStart(2, "0")} / <MarkdownInline source={direction.english} /></span>
@@ -54,7 +53,7 @@ export default async function ResearchDetail({ params }: { params: Promise<{ slu
         <div className="container">
           <div className="section-heading"><div className="section-heading-line"><span>02</span><h2><MarkdownInline source={content.pageText.papersTitle} /></h2><small>PUBLICATIONS & FIGURES</small></div><MarkdownText source={content.pageText.papersIntro} className="section-intro-markdown" /></div>
           <PhotoMosaic kind="paper" items={direction.papers.map((paper) => ({ title: paper.title, description: paper.description, image: paper.image, url: paper.url, layout: paper.layout, layoutMobile: paper.layoutMobile }))} />
-          <Link className="paper-index-link" href="/archive/publications">查看团队论文与著作目录 <span aria-hidden="true">↗</span></Link>
+          <a className="paper-index-link" href="/archive/publications">查看团队论文与著作目录 <span aria-hidden="true">↗</span></a>
         </div>
       </section>
 

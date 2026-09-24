@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { getSiteContent } from "./content";
 import { appearanceStyle } from "./appearance";
 import { MarkdownInline, MarkdownText } from "./markdown";
@@ -32,7 +31,7 @@ export default async function Home() {
         <div className="container header-inner">
           <a className="brand" href="#top"><span className="brand-monogram">数研</span><span><strong><MarkdownInline source={content.siteName} /></strong><small><MarkdownInline source={content.institution} /></small></span></a>
           <nav className="main-nav" aria-label="主导航">
-            <a href="#team">团队成员</a><a href="#research">研究方向</a><a href="#outcomes">研究成果</a><a href="#news">团队动态</a><a href="#other">其他</a>{content.customSections.map((section) => <a href={`#custom-${section.id}`} key={section.id}><MarkdownInline source={section.title} /></a>)}<a href="#contact">联系我们</a><Link href="/edit">编辑网站</Link>
+            <a href="#team">团队成员</a><a href="#research">研究方向</a><a href="#outcomes">研究成果</a><a href="#news">团队动态</a><a href="#other">其他</a>{content.customSections.map((section) => <a href={`#custom-${section.id}`} key={section.id}><MarkdownInline source={section.title} /></a>)}<a href="#contact">联系我们</a><a href="/edit">编辑网站</a>
           </nav>
         </div>
       </header>
@@ -48,12 +47,12 @@ export default async function Home() {
           </div>
           <aside className="hero-news" aria-label="最新动态">
             <div className="news-topline"><span>最新动态</span><span>LATEST NEWS</span></div>
-            <Link href={featuredHref} aria-label={`查看${featuredNews?.title ?? "团队动态"}`}><ImageSlot label="活动照片或论文封面待上传" className="news-photo" src={content.hero.featureImage} /></Link>
+            <a href={featuredHref} aria-label={`查看${featuredNews?.title ?? "团队动态"}`}><ImageSlot label="活动照片或论文封面待上传" className="news-photo" src={content.hero.featureImage} /></a>
             <div className="news-content">
               {content.hero.featureLabel && <span className="news-kicker"><MarkdownInline source={content.hero.featureLabel} /></span>}
-              <h2><Link href={featuredHref}><MarkdownInline source={content.hero.featureTitle} /></Link></h2>
+              <h2><a href={featuredHref}><MarkdownInline source={content.hero.featureTitle} /></a></h2>
               {content.hero.featureText && <MarkdownText source={content.hero.featureText} className="news-description" />}
-              <Link href={featuredHref}>查看动态详情 <span aria-hidden="true">↗</span></Link>
+              <a href={featuredHref}>查看动态详情 <span aria-hidden="true">↗</span></a>
             </div>
           </aside>
         </div>
@@ -79,12 +78,12 @@ export default async function Home() {
           <div className="direction-grid">
             {content.directions.map((direction, index) => (
               <article className="direction-card" key={direction.slug}>
-                <Link className="direction-image" href={`/research/${direction.slug}`} aria-label={`查看${direction.title}`}>{direction.image && <img src={direction.image} alt={`${direction.title}概念插图`} loading="lazy" />}<span className={`formula-badge formula-badge--${direction.slug}`}><MarkdownInline source={direction.equation} /></span></Link>
+                <a className="direction-image" href={`/research/${direction.slug}`} aria-label={`查看${direction.title}`}>{direction.image && <img src={direction.image} alt={`${direction.title}概念插图`} loading="lazy" />}<span className={`formula-badge formula-badge--${direction.slug}`}><MarkdownInline source={direction.equation} /></span></a>
                 <div className="direction-copy">
                   <div className="direction-meta"><span>{String(index + 1).padStart(2, "0")}</span><small><MarkdownInline source={direction.english} /></small></div>
-                  <h3><Link href={`/research/${direction.slug}`}><MarkdownInline source={direction.title} /></Link></h3>
+                  <h3><a href={`/research/${direction.slug}`}><MarkdownInline source={direction.title} /></a></h3>
                   <MarkdownText source={direction.summary} className="direction-description" />
-                  <Link className="direction-link" href={`/research/${direction.slug}`}>了解研究内容与论文展示 <span aria-hidden="true">↗</span></Link>
+                  <a className="direction-link" href={`/research/${direction.slug}`}>了解研究内容与论文展示 <span aria-hidden="true">↗</span></a>
                 </div>
               </article>
             ))}
@@ -96,7 +95,7 @@ export default async function Home() {
         <div className="container">
           <SectionTitle number="03" title={content.sectionTitles.outcomes} english="OUTCOMES" intro={content.sectionIntros.outcomes} />
           <div className="outcome-grid">
-            {outcomes.map((item, index) => <article className="outcome-card" key={item.slug}><Link href={`/archive/${item.slug}`} aria-label={`查看${item.title}图片及表格`}><ImageSlot label={`${item.title}图片待上传`} src={item.cover} /></Link><div><small>{String(index + 1).padStart(2, "0")} / <MarkdownInline source={item.english} /></small><h3><Link href={`/archive/${item.slug}`}><MarkdownInline source={item.title} /></Link></h3><MarkdownText source={item.summary} className="module-description" /><Link className="module-link" href={`/archive/${item.slug}`}>查看图片与资料表 <span aria-hidden="true">↗</span></Link></div></article>)}
+            {outcomes.map((item, index) => <article className="outcome-card" key={item.slug}><a href={`/archive/${item.slug}`} aria-label={`查看${item.title}图片及表格`}><ImageSlot label={`${item.title}图片待上传`} src={item.cover} /></a><div><small>{String(index + 1).padStart(2, "0")} / <MarkdownInline source={item.english} /></small><h3><a href={`/archive/${item.slug}`}><MarkdownInline source={item.title} /></a></h3><MarkdownText source={item.summary} className="module-description" /><a className="module-link" href={`/archive/${item.slug}`}>查看图片与资料表 <span aria-hidden="true">↗</span></a></div></article>)}
           </div>
         </div>
       </section>
@@ -105,7 +104,7 @@ export default async function Home() {
         <div className="container">
           <SectionTitle number="04" title={content.sectionTitles.news} english="NEWS & EVENTS" intro={content.sectionIntros.news} />
           <div className="news-grid">
-            {news.map((item) => <article className="news-card" key={item.slug}><Link href={`/archive/${item.slug}`} aria-label={`查看${item.title}`}><ImageSlot label={`${item.title}图片待上传`} src={item.cover} /></Link><div><small><MarkdownInline source={item.english} /></small><h3><Link href={`/archive/${item.slug}`}><MarkdownInline source={item.title} /></Link></h3><MarkdownText source={item.summary} className="module-description" /><Link className="module-link" href={`/archive/${item.slug}`}>查看图片与资料表 <span aria-hidden="true">↗</span></Link></div></article>)}
+            {news.map((item) => <article className="news-card" key={item.slug}><a href={`/archive/${item.slug}`} aria-label={`查看${item.title}`}><ImageSlot label={`${item.title}图片待上传`} src={item.cover} /></a><div><small><MarkdownInline source={item.english} /></small><h3><a href={`/archive/${item.slug}`}><MarkdownInline source={item.title} /></a></h3><MarkdownText source={item.summary} className="module-description" /><a className="module-link" href={`/archive/${item.slug}`}>查看图片与资料表 <span aria-hidden="true">↗</span></a></div></article>)}
           </div>
         </div>
       </section>
@@ -114,7 +113,7 @@ export default async function Home() {
         <div className="container">
           <SectionTitle number="05" title={content.sectionTitles.other} english="MORE" intro={content.sectionIntros.other} />
           <div className="outcome-grid">
-            {other.map((item, index) => <article className="outcome-card" key={item.slug}><Link href={`/archive/${item.slug}`} aria-label={`查看${item.title}`}><ImageSlot label={item.title} src={item.cover} /></Link><div><small>{String(index + 1).padStart(2, "0")} / <MarkdownInline source={item.english} /></small><h3><Link href={`/archive/${item.slug}`}><MarkdownInline source={item.title} /></Link></h3>{item.summary && <MarkdownText source={item.summary} className="module-description" />}<Link className="module-link" href={`/archive/${item.slug}`}>查看栏目 <span aria-hidden="true">↗</span></Link></div></article>)}
+            {other.map((item, index) => <article className="outcome-card" key={item.slug}><a href={`/archive/${item.slug}`} aria-label={`查看${item.title}`}><ImageSlot label={item.title} src={item.cover} /></a><div><small>{String(index + 1).padStart(2, "0")} / <MarkdownInline source={item.english} /></small><h3><a href={`/archive/${item.slug}`}><MarkdownInline source={item.title} /></a></h3>{item.summary && <MarkdownText source={item.summary} className="module-description" />}<a className="module-link" href={`/archive/${item.slug}`}>查看栏目 <span aria-hidden="true">↗</span></a></div></article>)}
           </div>
         </div>
       </section>

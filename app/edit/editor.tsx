@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState, useId } from "react";
-import type { SiteContent, DirectionItem, ArchiveItem, CustomSection, SubsectionItem, Appearance, PhotoLayout } from "../content";
+import type { SiteContent, DirectionItem, ArchiveItem, NewsArticle, CustomSection, SubsectionItem, Appearance, PhotoLayout } from "../content";
 import { defaultAppearance, defaultMobileAppearance } from "../appearance-defaults";
 import { MarkdownInline, MarkdownText } from "../markdown";
 import { LivePreview } from "./live-preview";
 import { PhotoComposer } from "./photo-composer";
+import { importNewsFile } from "./news-import";
 
 type Path = Array<string | number>;
 
@@ -67,6 +68,7 @@ function Editor({ initial }: { initial: SiteContent }) {
   const [previewView, setPreviewView] = useState("home");
   const [activeItemIndex, setActiveItemIndex] = useState<number | null>(null);
   const [previewFocusPath, setPreviewFocusPath] = useState("");
+  const [importingArticleId, setImportingArticleId] = useState("");
 
   useEffect(() => {
     function warnBeforeLeaving(event: BeforeUnloadEvent) {
@@ -93,8 +95,9 @@ function Editor({ initial }: { initial: SiteContent }) {
     contentRef.current = next;
     setContent(next);
     setHistory({ undo: undoRef.current.length > 0, redo: false });
-    setDirty(JSON.stringify(next) !== savedRef.current);
-    setStatus("有未保存的修改");
+    const hasChanges = JSON.stringify(next) !== savedRef.current;
+    setDirty(hasChanges);
+    setStatus(hasChanges ? "有未保存的修改" : "已恢复到上次保存的内容");
   }
 
   function selectPreview(path: Path, value?: unknown) {
@@ -142,6 +145,10 @@ function Editor({ initial }: { initial: SiteContent }) {
     commit((next) => {
       let target: Record<string | number, unknown> = next as unknown as Record<string | number, unknown>;
       for (const key of path) target = target[key] as Record<string | number, unknown>;
+      if (path[0] === "archives" && path[2] === "newsArticles") {
+        const article = (target as unknown as NewsArticle[])[index];
+        if (article?.id === next.hero.featureArticleId) next.hero.featureArticleId = "";
+      }
       (target as unknown as unknown[]).splice(index, 1);
     });
   }
@@ -217,6 +224,7 @@ function Editor({ initial }: { initial: SiteContent }) {
     if (section === "members") { setPreviewView("team"); setActiveItemIndex(index ?? null); }
     if (section === "directions") { setPreviewView("research"); setActiveItemIndex(index ?? null); }
     if (section === "archives") { setPreviewView(index === undefined ? "outcomes" : contentRef.current.archives[index]?.homeAnchor ?? "outcomes"); setActiveItemIndex(index ?? null); }
+    if (section === "news-posts") { setPreviewView("news"); setActiveItemIndex(index ?? null); }
     if (section === "custom" && index !== undefined) { setPreviewView(`custom-${contentRef.current.customSections[index]?.id}`); setActiveItemIndex(null); }
     if (section === "contact") { setPreviewView("contact"); setActiveItemIndex(null); }
     const element = document.getElementById(`editor-${section}`) as HTMLDetailsElement | null;
@@ -244,6 +252,14 @@ function Editor({ initial }: { initial: SiteContent }) {
   }
 
   async function save() {
+    const incomplete = contentRef.current.archives.flatMap((archive, archiveIndex) => (archive.slug === "events" || archive.slug === "updates")
+      ? archive.newsArticles.map((article, articleIndex) => ({ article, archiveIndex, articleIndex })).filter(({ article }) => article.id !== "original-events-material" && (!article.title.trim() || !article.date || !article.attachment)) : [])[0];
+    if (incomplete) {
+      setStatus("请先填写新闻稿标题、日期并上传 DOCX 或 PDF 文件，再保存。");
+      jump("news-posts", incomplete.archiveIndex);
+      requestAnimationFrame(() => document.getElementById(`editor-news-${contentRef.current.archives[incomplete.archiveIndex].slug}-${incomplete.article.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" }));
+      return;
+    }
     setBusy(true);
     setStatus("正在保存…");
     const snapshot = JSON.stringify(contentRef.current);
@@ -251,16 +267,45 @@ function Editor({ initial }: { initial: SiteContent }) {
       const response = await fetch("/api/site-content", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: snapshot,
       });
-      const result = await response.json() as { error?: string };
+      const result = await response.json() as { error?: string; revision?: string };
       if (!response.ok) throw new Error(result.error ?? "保存失败");
-      savedRef.current = snapshot;
-      const hasChanges = JSON.stringify(contentRef.current) !== snapshot;
+      const saved = { ...(JSON.parse(snapshot) as SiteContent), revision: result.revision ?? contentRef.current.revision };
+      savedRef.current = JSON.stringify(saved);
+      contentRef.current = { ...contentRef.current, revision: saved.revision };
+      setContent(contentRef.current);
+      const hasChanges = JSON.stringify(contentRef.current) !== savedRef.current;
       setDirty(hasChanges);
       setStatus(hasChanges ? "已保存刚才的内容；还有新的修改待保存" : "已保存。刷新网站即可查看最新内容。");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "保存失败，请重试");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function importArticle(file: File, archiveIndex: number, articleIndex: number) {
+    const id = contentRef.current.archives[archiveIndex]?.newsArticles[articleIndex]?.id;
+    if (!id) return;
+    setImportingArticleId(id);
+    try {
+      const imported = await importNewsFile(file, setStatus);
+      selectPreview(["archives", archiveIndex, "newsArticles", articleIndex]);
+      commit((next) => {
+        const article = next.archives[archiveIndex]?.newsArticles.find((item) => item.id === id);
+        if (!article) return;
+        article.body = imported.body;
+        article.summary = imported.summary;
+        article.images = imported.images;
+        article.thumbnail = imported.images[0]?.image || article.thumbnail;
+        article.attachment = imported.attachment;
+        article.attachmentName = imported.attachmentName;
+        article.importWarnings = imported.warnings;
+      });
+      setStatus(imported.warnings.some((item) => /无法|未能/.test(item)) ? "附件已导入，但部分内容需要核对；请查看下方提示。" : "附件已导入。请预览后保存全部修改。");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "导入失败，请重试");
+    } finally {
+      setImportingArticleId("");
     }
   }
 
@@ -285,6 +330,7 @@ function Editor({ initial }: { initial: SiteContent }) {
   const selectedAppearance = content[appearanceKey];
   const newsOptions = content.archives.filter((item) => item.homeAnchor === "news");
   const featuredNews = newsOptions.find((item) => item.slug === content.hero.featureTargetSlug);
+  const featuredArticle = featuredNews?.newsArticles.find((item) => item.id === content.hero.featureArticleId);
   const sizeField = (label: string, key: keyof Appearance, min: number, max: number, step = 1, unit = "px") =>
     <SizeControl label={label} value={selectedAppearance[key] as number} min={min} max={max} step={step} unit={unit} onChange={(value) => write([appearanceKey, key], value)} />;
   const subsectionEditor = (path: Path, subsections: SubsectionItem[]) => <>
@@ -308,7 +354,7 @@ function Editor({ initial }: { initial: SiteContent }) {
   return <main className="editor-page">
     <div className="editor-top"><div><p className="editor-eyebrow">SITE EDITOR / 在线编辑</p><h1>编辑科研团队网站</h1><p>边改边看效果；确认后点击“保存全部修改”，网站页面刷新后就会更新。</p></div><a href="/" target="_blank" rel="noopener noreferrer">打开网站 ↗</a></div>
     <div className="editor-sticky"><span role="status" className={dirty ? "is-dirty" : ""}>{status || "修改将保存在在线网站"}</span><div className="editor-sticky-actions"><button type="button" className="editor-history" onClick={() => restore("undo")} disabled={!history.undo} title="撤销上一步修改">撤销</button><button type="button" className="editor-history" onClick={() => restore("redo")} disabled={!history.redo} title="恢复已撤销的修改">重做</button><button type="button" onClick={() => void save()} disabled={busy || !dirty}>{busy ? "保存中…" : dirty ? "保存全部修改" : "已保存"}</button></div></div>
-    <nav className="editor-jump" aria-label="快速定位编辑栏目">{[["home", "首页"], ["appearance", "字体与图片"], ["members", "团队成员"], ["directions", "研究方向"], ["archives", "成果、动态与其他"], ["custom", "自定义栏目"], ["contact", "联系我们"], ["sections", "栏目与底图"], ["pages", "详情页文字"]].map(([key, label]) => <button type="button" key={key} onClick={() => jump(key)}>{label}</button>)}</nav>
+    <nav className="editor-jump" aria-label="快速定位编辑栏目">{[["home", "首页"], ["appearance", "字体与图片"], ["members", "团队成员"], ["directions", "研究方向"], ["outcomes", "研究成果"], ["news", "团队动态"], ["news-posts", "新闻稿"], ["other", "其他"], ["custom", "自定义栏目"], ["contact", "联系我们"], ["sections", "栏目与底图"], ["pages", "详情页文字"]].map(([key, label]) => <button type="button" key={key} onClick={() => { if (key === "outcomes" || key === "news" || key === "other") { jump("archives"); setPreviewView(key); } else if (key === "custom" && content.customSections.length) { jump("custom", 0); } else { jump(key); } }}>{label}</button>)}</nav>
     <div className="editor-workspace">
     <LivePreview content={content} view={previewView} activeItemIndex={activeItemIndex} focusPath={previewFocusPath} onViewChange={(view) => { setPreviewView(view); setActiveItemIndex(null); setPreviewFocusPath(""); }} onEdit={jump} onEditSubsection={jumpToSubsection} onAddCustomSection={() => addCustomSection()} mobile={mobileMode} onModeChange={setMobileMode} />
     <div className="editor-panels">
@@ -345,19 +391,24 @@ function Editor({ initial }: { initial: SiteContent }) {
         <SizeControl label="首页背景图可见度" value={Math.round(content.hero.backgroundVisibility * 100)} min={0} max={100} unit="%" onChange={(value) => write(["hero", "backgroundVisibility"], value / 100)} />
         <p className="editor-help">0% 为纯浅蓝底色，100% 为原图；可在实时预览区查看调整效果。</p>
         <h3>首页右侧最新动态</h3>
-        <label className="editor-field"><span>点击卡片后打开</span><select value={content.hero.featureTargetSlug} onChange={(event) => write(["hero", "featureTargetSlug"], event.target.value)}>
+        <label className="editor-field"><span>点击卡片后打开</span><select value={content.hero.featureTargetSlug} onChange={(event) => { const slug = event.target.value; selectPreview(["hero", "featureTargetSlug"]); commit((next) => { next.hero.featureTargetSlug = slug; next.hero.featureArticleId = ""; }); }}>
           <option value="">团队动态栏目</option>
           {newsOptions.map((item) => <option value={item.slug} key={item.slug}>{item.title}</option>)}
           {content.hero.featureTargetSlug && !featuredNews && <option value={content.hero.featureTargetSlug}>原链接已失效，请重新选择</option>}
         </select></label>
+        {featuredNews && <label className="editor-field"><span>指定新闻稿（可选）</span><select value={featuredArticle?.id ?? ""} onChange={(event) => write(["hero", "featureArticleId"], event.target.value)}>
+          <option value="">打开{featuredNews.title}列表</option>
+          {featuredNews.newsArticles.map((article) => <option value={article.id} key={article.id}>{article.title || "未命名新闻稿"}{article.date ? ` · ${article.date}` : ""}</option>)}
+        </select></label>}
         <div className="editor-feature-source"><span>可单独修改下方文案和图片；选择链接后也可引用该子栏目的现有内容。</span><button type="button" disabled={!featuredNews} onClick={() => {
           if (!featuredNews) return;
           selectPreview(["hero", "featureTitle"]);
           commit((next) => {
             next.hero.featureLabel = featuredNews.english;
-            next.hero.featureTitle = featuredNews.title;
-            next.hero.featureText = featuredNews.summary || featuredNews.description;
-            if (featuredNews.cover) next.hero.featureImage = featuredNews.cover;
+            next.hero.featureTitle = featuredArticle?.title || featuredNews.title;
+            next.hero.featureText = featuredArticle?.summary || featuredNews.summary || featuredNews.description;
+            const image = featuredArticle?.thumbnail || featuredNews.cover;
+            if (image) next.hero.featureImage = image;
           });
         }}>引用所选动态内容</button></div>
         {editField("栏目提示", ["hero", "featureLabel"], content.hero.featureLabel)}
@@ -434,7 +485,41 @@ function Editor({ initial }: { initial: SiteContent }) {
           <button className="editor-add" onClick={() => add(["archives", index, "rows"], archive.columns.map(() => ""))}>＋ 添加表格条目</button>
           {subsectionEditor(["archives", index, "subsections"], archive.subsections)}
         </div>)}
-        <button className="editor-add" onClick={() => add(["archives"], { slug: `archive-${Date.now()}`, group: "其他", homeAnchor: "other", title: "新栏目", english: "MORE", description: "", summary: "", cover: "", gallery: [], columns: ["标题", "内容", "链接"], rows: [], subsections: [] } satisfies ArchiveItem)}>＋ 添加成果 / 动态模块</button>
+        <button className="editor-add" onClick={() => add(["archives"], { slug: `archive-${Date.now()}`, group: "其他", homeAnchor: "other", title: "新栏目", english: "MORE", description: "", summary: "", cover: "", gallery: [], columns: ["标题", "内容", "链接"], rows: [], subsections: [], newsArticles: [] } satisfies ArchiveItem)}>＋ 添加成果 / 动态模块</button>
+      </div></details>
+      <details id="editor-news-posts" open><summary>新闻稿 · 学术交流与团队活动 / 最新论文与研究进展</summary><div className="editor-panel-body">
+        {content.archives.map((archive, archiveIndex) => ({ archive, archiveIndex })).filter(({ archive }) => archive.slug === "events" || archive.slug === "updates").map(({ archive, archiveIndex }) => <div className="editor-news-category" key={archive.slug}>
+          <div className="editor-news-category-head"><div><h3>{archive.title}</h3><p>列表：/archive/{archive.slug} · {archive.newsArticles.length} 篇</p></div><button type="button" className="editor-add" onClick={() => {
+            const article: NewsArticle = { id: crypto.randomUUID(), title: "", date: "", source: "", summary: "", body: "", thumbnail: "", images: [], attachment: "", attachmentName: "", importWarnings: [] };
+            add(["archives", archiveIndex, "newsArticles"], article);
+            setPreviewFocusPath(`archives.${archiveIndex}.newsArticles.${archive.newsArticles.length}`);
+            requestAnimationFrame(() => document.getElementById(`editor-news-${archive.slug}-${article.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" }));
+          }}>＋ 添加新闻稿</button></div>
+          {archive.newsArticles.length === 0 && <p className="editor-help">尚无新闻稿。点击“＋ 添加新闻稿”创建首篇。</p>}
+          {archive.newsArticles.map((article, articleIndex) => <div className="editor-item editor-news-article" id={`editor-news-${archive.slug}-${article.id}`} key={article.id}>
+            <div className="editor-item-head"><div><h4>{article.title || `未命名新闻稿 ${articleIndex + 1}`}</h4><small>{article.date || "日期未填写"} · /archive/{archive.slug}/{article.id}</small></div><div><button type="button" onClick={() => move(["archives", archiveIndex, "newsArticles"], articleIndex, -1)} disabled={articleIndex === 0}>上移</button><button type="button" onClick={() => move(["archives", archiveIndex, "newsArticles"], articleIndex, 1)} disabled={articleIndex === archive.newsArticles.length - 1}>下移</button><button type="button" onClick={() => remove(["archives", archiveIndex, "newsArticles"], articleIndex)}>删除</button></div></div>
+            {editField("新闻标题（必填）", ["archives", archiveIndex, "newsArticles", articleIndex, "title"], article.title)}
+            <label className="editor-field"><span>发布日期（必填）</span><input type="date" value={article.date} onChange={(event) => write(["archives", archiveIndex, "newsArticles", articleIndex, "date"], event.target.value)} /></label>
+            {editField("来源（选填）", ["archives", archiveIndex, "newsArticles", articleIndex, "source"], article.source)}
+            <div className="editor-news-upload"><strong>新闻稿文件（DOCX 或 PDF，20 MB 以内）</strong><p>上传后自动生成预览；PDF 会在文章页完整显示，Word 会提取正文和图片。旧版 .doc 请先转换为 .docx。</p>
+              <label className="editor-upload">{importingArticleId === article.id ? "正在导入…" : article.attachment ? "重新上传文件" : "选择 Word 或 PDF 文件"}<input type="file" accept=".docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" disabled={!!importingArticleId} onChange={(event) => { const file = event.target.files?.[0]; if (file) void importArticle(file, archiveIndex, articleIndex); event.target.value = ""; }} /></label>
+              {article.attachment && <a href={`${article.attachment}?name=${encodeURIComponent(article.attachmentName || "新闻稿")}`} target="_blank" rel="noopener noreferrer">已上传：{article.attachmentName || "原始文件"} ↗</a>}
+            </div>
+            {article.importWarnings.length > 0 && <div className="editor-news-warnings"><strong>导入检查提示</strong><ul>{article.importWarnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></div>}
+            <details className="editor-news-advanced"><summary>导入结果检查与必要修正（选填）</summary><div>
+              {editField("列表摘要", ["archives", archiveIndex, "newsArticles", articleIndex, "summary"], article.summary, true)}
+              {imageField("列表缩略图", ["archives", archiveIndex, "newsArticles", articleIndex, "thumbnail"], article.thumbnail)}
+              {editField("转换后的正文（Markdown 与数学公式）", ["archives", archiveIndex, "newsArticles", articleIndex, "body"], article.body, true)}
+              <h4>提取出的图片 · {article.images.length} 张</h4>
+              {article.images.map((item, imageIndex) => <div className="editor-subitem" key={imageIndex}>
+                {imageField(`正文图片 ${imageIndex + 1}`, ["archives", archiveIndex, "newsArticles", articleIndex, "images", imageIndex, "image"], item.image)}
+                {editField("图片说明", ["archives", archiveIndex, "newsArticles", articleIndex, "images", imageIndex, "caption"], item.caption, true, true)}
+                <button type="button" onClick={() => remove(["archives", archiveIndex, "newsArticles", articleIndex, "images"], imageIndex)}>删除图片</button>
+              </div>)}
+              <button type="button" className="editor-add" onClick={() => add(["archives", archiveIndex, "newsArticles", articleIndex, "images"], { image: "", caption: "" })}>＋ 补充图片</button>
+            </div></details>
+          </div>)}
+        </div>)}
       </div></details>
       <button type="button" className="editor-add editor-add-section" onClick={() => addCustomSection(true)}>＋ 添加栏目</button>
       <details id="editor-custom" open><summary>自定义栏目 · {content.customSections.length} 个</summary><div className="editor-panel-body">

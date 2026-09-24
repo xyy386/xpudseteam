@@ -6,6 +6,10 @@ import savedContent from "./saved-content.json";
 
 export type PhotoLayout = { x: number; y: number; w: number; h: number };
 export type GalleryItem = { label: string; image: string; caption: string; layout?: PhotoLayout; layoutMobile?: PhotoLayout };
+export type NewsArticle = {
+  id: string; title: string; date: string; summary: string; body: string; thumbnail: string;
+  images: Array<{ image: string; caption: string }>; attachment: string; attachmentName: string; source: string; importWarnings: string[];
+};
 export type PaperItem = { title: string; description: string; image: string; url: string; layout?: PhotoLayout; layoutMobile?: PhotoLayout };
 export type TopicItem = { title: string; detail: string; image: string };
 export type SubsectionItem = { id: string; title: string; body: string; image: string; url: string; items: PaperItem[] };
@@ -16,7 +20,7 @@ export type DirectionItem = {
 export type ArchiveItem = {
   slug: string; group: string; homeAnchor: string; title: string; english: string;
   description: string; summary: string; cover: string; gallery: GalleryItem[];
-  columns: string[]; rows: string[][]; subsections: SubsectionItem[];
+  columns: string[]; rows: string[][]; subsections: SubsectionItem[]; newsArticles: NewsArticle[];
 };
 export type CustomSection = {
   id: string; title: string; english: string; intro: string; body: string; image: string; items: PaperItem[]; subsections: SubsectionItem[];
@@ -43,10 +47,11 @@ export type Appearance = {
   imageFit: "cover" | "contain";
 };
 export type SiteContent = {
+  revision: string;
   siteName: string; institution: string; contact: string;
   contactDetails: { person: string; role: string; email: string; phone: string; address: string; extra: string };
   hero: { eyebrow: string; title: string; subtitle: string; detail: string; background: string; backgroundVisibility: number;
-    featureLabel: string; featureTitle: string; featureText: string; featureImage: string; featureTargetSlug: string; };
+    featureLabel: string; featureTitle: string; featureText: string; featureImage: string; featureTargetSlug: string; featureArticleId: string; };
   sectionTitles: { team: string; research: string; outcomes: string; news: string; other: string; contact: string };
   sectionIntros: { team: string; research: string; outcomes: string; news: string; other: string; contact: string };
   pageText: {
@@ -74,6 +79,7 @@ const cardSummaries: Record<string, string> = {
 };
 
 export const defaultContent: SiteContent = {
+  revision: "",
   siteName: "数据驱动的科学工程建模与计算团队",
   institution: "西安工程大学 · 科研团队",
   contact: "西安工程大学",
@@ -90,6 +96,7 @@ export const defaultContent: SiteContent = {
     featureText: "",
     featureImage: "",
     featureTargetSlug: "updates",
+    featureArticleId: "",
   },
   sectionTitles: { team: "团队成员", research: "研究方向", outcomes: "研究成果", news: "团队动态", other: "其他", contact: "联系我们" },
   sectionIntros: {
@@ -135,9 +142,27 @@ export const defaultContent: SiteContent = {
     gallery: section.imageLabels.map((label) => ({ label, image: "", caption: "" })),
     rows: [],
     subsections: [],
+    newsArticles: [],
   })),
   customSections: [],
 };
+
+function legacyNewsArticles(item: ArchiveItem): NewsArticle[] {
+  if (Array.isArray(item.newsArticles)) return item.newsArticles.map((article) => ({
+    ...article, date: article.date ?? "", summary: article.summary ?? "", body: article.body ?? "",
+    thumbnail: article.thumbnail ?? "", images: Array.isArray(article.images) ? article.images : [],
+    attachment: article.attachment ?? "", attachmentName: article.attachmentName ?? "", source: article.source ?? "",
+    importWarnings: Array.isArray(article.importWarnings) ? article.importWarnings : [],
+  }));
+  if (item.slug !== "events" || !item.summary?.trim()) return [];
+  return [{
+    id: "original-events-material", title: "学术交流与团队活动（原有资料）", date: "",
+    summary: item.summary, body: item.summary,
+    thumbnail: item.cover || item.gallery?.find((image) => image.image)?.image || "",
+    images: (item.gallery ?? []).filter((image) => image.image).map((image) => ({ image: image.image, caption: image.caption || image.label })),
+    attachment: "", attachmentName: "", source: "", importWarnings: [],
+  }];
+}
 
 function mergeContent(base: SiteContent, saved: Partial<SiteContent>): SiteContent {
   return {
@@ -153,7 +178,7 @@ function mergeContent(base: SiteContent, saved: Partial<SiteContent>): SiteConte
       appearance: { ...base.appearance, ...saved.appearance },
       appearanceMobile: { ...base.appearanceMobile, ...saved.appearanceMobile },
       directions: (saved.directions ?? base.directions).map((item) => ({ ...item, subsections: Array.isArray(item.subsections) ? item.subsections : [] })),
-      archives: (saved.archives ?? base.archives).map((item) => ({ ...item, subsections: Array.isArray(item.subsections) ? item.subsections : [] })),
+      archives: (saved.archives ?? base.archives).map((item) => ({ ...item, subsections: Array.isArray(item.subsections) ? item.subsections : [], newsArticles: legacyNewsArticles(item) })),
       customSections: Array.isArray(saved.customSections) ? saved.customSections.map((item) => ({ ...item, subsections: Array.isArray(item.subsections) ? item.subsections : [] })) : base.customSections,
     };
 }
@@ -163,9 +188,9 @@ const initialContent = mergeContent(defaultContent, savedContent as unknown as P
 export async function getSiteContent(): Promise<SiteContent> {
   if (!env.DB) return initialContent;
   try {
-    const row = await env.DB.prepare("SELECT data FROM site_content WHERE id = 1").first<{ data: string }>();
+    const row = await env.DB.prepare("SELECT data, updated_at FROM site_content WHERE id = 1").first<{ data: string; updated_at: string }>();
     if (!row) return initialContent;
-    return mergeContent(initialContent, JSON.parse(row.data) as Partial<SiteContent>);
+    return { ...mergeContent(initialContent, JSON.parse(row.data) as Partial<SiteContent>), revision: row.updated_at };
   } catch (error) {
     console.error("Site content unavailable", error);
     return initialContent;

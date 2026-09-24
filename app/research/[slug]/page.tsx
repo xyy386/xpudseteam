@@ -4,6 +4,7 @@ import { appearanceStyle } from "../../appearance";
 import { MarkdownInline, MarkdownText } from "../../markdown";
 import { PhotoMosaic } from "../../photo-mosaic";
 import { SubsectionCards } from "../../subsections";
+import { SiteFooter, SiteHeader } from "../../site-shell";
 
 export default async function ResearchDetail({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
@@ -14,15 +15,10 @@ export default async function ResearchDetail({ params }: { params: Promise<{ slu
 
   return (
     <main className="detail-page site-page" style={appearanceStyle(content.appearance, content.appearanceMobile)}>
-      <header className="site-header">
-        <div className="container header-inner">
-          <a className="brand" href="/"><span className="brand-monogram">数研</span><span><strong>{content.siteName}</strong><small>{content.institution}</small></span></a>
-          <nav className="main-nav" aria-label="主导航"><a href="/#team">团队成员</a><a href="/#research">研究方向</a><a href="/#outcomes">研究成果</a><a href="/#news">团队动态</a><a href="/#other">其他</a>{content.customSections.map((section) => <a href={`/#custom-${section.id}`} key={section.id}><MarkdownInline source={section.title} /></a>)}<a href="/#contact">联系我们</a><a href="/edit">编辑网站</a></nav>
-        </div>
-      </header>
+      <SiteHeader content={content} active="research" />
       <div className="detail-hero">
         <div className="container">
-          <a className="back-link" href="/#research">← 返回研究方向</a>
+          <a className="back-link" href="/research">← 返回研究方向</a>
           <div className="detail-hero-grid">
             <div>
               <span className="detail-index">RESEARCH {String(index + 1).padStart(2, "0")} / <MarkdownInline source={direction.english} /></span>
@@ -60,7 +56,7 @@ export default async function ResearchDetail({ params }: { params: Promise<{ slu
       {direction.subsections.length > 0 && <section className="site-section subsections-section"><div className="container"><SubsectionCards sections={direction.subsections} /></div></section>}
 
       <section className="site-section related-section"><div className="container"><div className="section-heading"><div className="section-heading-line"><span>{direction.subsections.length ? "04" : "03"}</span><h2><MarkdownInline source={content.pageText.relatedTitle} /></h2><small>EXPLORE MORE</small></div></div><div className="related-grid">{content.directions.filter((item) => item.slug !== slug).map((item) => <a href={`/research/${item.slug}`} key={item.slug}>{item.image && <img src={item.image} alt="" loading="lazy" />}<span><MarkdownInline source={item.title} /> <b aria-hidden="true">↗</b></span></a>)}</div></div></section>
-      <footer><div className="container footer-inner"><div><strong><MarkdownInline source={content.siteName} /></strong><p><MarkdownInline source={content.institution} /></p></div></div></footer>
+      <SiteFooter content={content} />
     </main>
   );
 }

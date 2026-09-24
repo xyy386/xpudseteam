@@ -556,7 +556,7 @@ function Editor({ initial, role, email }: { initial: SiteContent; role: "owner" 
             {editField("新闻标题（必填）", ["archives", archiveIndex, "newsArticles", articleIndex, "title"], article.title)}
             <label className="editor-field"><span>发布日期（必填）</span><input type="date" value={article.date} onChange={(event) => write(["archives", archiveIndex, "newsArticles", articleIndex, "date"], event.target.value)} /></label>
             {editField("来源（选填）", ["archives", archiveIndex, "newsArticles", articleIndex, "source"], article.source)}
-            <div className="editor-news-upload"><strong>新闻稿文件（DOCX 或 PDF，20 MB 以内）</strong><p>上传后自动生成预览；PDF 会在文章页完整显示，Word 会提取正文和图片。旧版 .doc 请先转换为 .docx。</p>
+            <div className="editor-news-upload"><strong>新闻稿文件（DOCX 或 PDF，20 MB 以内）</strong><p>上传后自动生成预览；PDF 会直接打开阅读，Word 正文和图片按原文顺序显示。旧版 .doc 请先转换为 .docx。</p>
               <label className="editor-upload">{importingArticleId === article.id ? "正在导入…" : article.attachment ? "重新上传文件" : "选择 Word 或 PDF 文件"}<input type="file" accept=".docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" disabled={!!importingArticleId} onChange={(event) => { const file = event.target.files?.[0]; if (file) void importArticle(file, archiveIndex, articleIndex); event.target.value = ""; }} /></label>
               {article.attachment && <a href={`${article.attachment}?name=${encodeURIComponent(article.attachmentName || "新闻稿")}`} target="_blank" rel="noopener noreferrer">已上传：{article.attachmentName || "原始文件"} ↗</a>}
             </div>

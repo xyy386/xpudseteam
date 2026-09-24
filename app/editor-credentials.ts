@@ -3,7 +3,8 @@ import { cookies } from "next/headers";
 import { getChatGPTUser } from "./chatgpt-auth";
 
 export const SESSION_COOKIE = "research_editor_session";
-const PASSWORD_ITERATIONS = 310_000;
+// The production Workers runtime supports at most 100,000 PBKDF2 iterations.
+const PASSWORD_ITERATIONS = 100_000;
 const SESSION_LIFETIME = 12 * 60 * 60 * 1000;
 
 export type EditorIdentity =
@@ -49,7 +50,7 @@ export async function hashPassword(password: string): Promise<string> {
 export async function verifyPassword(password: string, stored: string): Promise<boolean> {
   const [method, iterationText, saltText, expectedText] = stored.split("$");
   const iterations = Number(iterationText);
-  if (method !== "pbkdf2-sha256" || !Number.isInteger(iterations) || iterations < 100_000 || iterations > 1_000_000 || !saltText || !expectedText) return false;
+  if (method !== "pbkdf2-sha256" || !Number.isInteger(iterations) || iterations < 100_000 || iterations > PASSWORD_ITERATIONS || !saltText || !expectedText) return false;
   try {
     const salt = base64urlToBytes(saltText);
     const expected = base64urlToBytes(expectedText);

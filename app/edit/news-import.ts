@@ -110,7 +110,7 @@ async function importPdf(file: File, progress: (message: string) => void): Promi
   }
   await pdf.cleanup();
   return { body: paragraphs.join("\n\n"), summary: firstText, images: [],
-    warnings: ["PDF 原稿将直接嵌入文章页，图表和排版以原文件为准；提取的文字仅用于摘要，请核对。"] };
+    warnings: ["PDF 原稿会直接打开阅读，图表和排版以原文件为准；提取的文字仅用于摘要，请核对。"] };
 }
 
 export async function importNewsFile(file: File, progress: (message: string) => void): Promise<ImportedNews> {

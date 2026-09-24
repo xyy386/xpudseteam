@@ -54,7 +54,7 @@ async function importDocx(file: File, progress: (message: string) => void): Prom
   const result = await mammoth.convertToHtml({ arrayBuffer: await file.arrayBuffer() });
   const document = new DOMParser().parseFromString(result.value, "text/html");
   const warnings = result.messages.map((item) => item.message);
-  const images: ImportedNews["images"] = [];
+  let insertedImageCount = 0;
   const elements = Array.from(document.querySelectorAll("img"));
   for (let index = 0; index < elements.length; index++) {
     const element = elements[index];
@@ -65,17 +65,19 @@ async function importDocx(file: File, progress: (message: string) => void): Prom
       const blob = await imageBlob(src);
       const extension = blob.type === "image/jpeg" ? "jpg" : blob.type === "image/webp" ? "webp" : blob.type === "image/gif" ? "gif" : "png";
       const uploaded = await uploadFile(new File([blob], `word-image-${index + 1}.${extension}`, { type: blob.type }), "/api/media");
-      images.push({ image: uploaded.url, caption: element.getAttribute("alt") || `原文图片 ${index + 1}` });
+      element.setAttribute("src", uploaded.url);
+      element.setAttribute("alt", element.getAttribute("alt") || `原文图片 ${index + 1}`);
+      insertedImageCount++;
     } catch {
       warnings.push(`第 ${index + 1} 张图片无法自动导入，请对照原文件手动上传。`);
     }
-    element.remove();
+    if (src.startsWith("data:image/") && element.getAttribute("src") === src) element.remove();
   }
   const service = new TurndownService({ headingStyle: "atx", bulletListMarker: "-" });
   const body = service.turndown(document.body.innerHTML).trim();
   const summary = (document.querySelector("p")?.textContent || document.body.textContent || "").trim().replace(/\s+/g, " ").slice(0, 180);
-  if (images.length) warnings.push("Word 中的图片已集中放在正文后，可在编辑器中调整图片与说明；复杂排版请对照原文件检查。");
-  return { body, summary, images, warnings };
+  if (insertedImageCount) warnings.push("Word 图片已按原文位置插入正文；复杂排版请对照原文件检查。");
+  return { body, summary, images: [], warnings };
 }
 
 async function importPdf(file: File, progress: (message: string) => void): Promise<Omit<ImportedNews, "attachment" | "attachmentName">> {

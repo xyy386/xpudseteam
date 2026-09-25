@@ -8,6 +8,8 @@ import { LivePreview } from "./live-preview";
 import { PhotoComposer } from "./photo-composer";
 import { importNewsFile } from "./news-import";
 import { conflictPreview, mergeSiteContent, type ConflictChoices, type MergeConflict } from "./three-way-merge";
+import SyncWorkspace from "../editor-sync/sync-workspace";
+import type { SyncEnvironment } from "../sync-environment";
 
 type Path = Array<string | number>;
 
@@ -53,7 +55,10 @@ function SizeControl({ label, value, min, max, step = 1, unit = "px", onChange }
   </div></label>;
 }
 
-function Editor({ initial, role, email, accountId }: { initial: SiteContent; role: "owner" | "member"; email: string; accountId: string }) {
+function Editor({ initial, role, email, accountId, environment, peerOrigin }: {
+  initial: SiteContent; role: "owner" | "member"; email: string; accountId: string;
+  environment: SyncEnvironment; peerOrigin: string;
+}) {
   const draftKey = `research-site-editor-conflict-draft:${role}:${accountId}`;
   const [content, setContent] = useState<SiteContent>(initial);
   const contentRef = useRef(initial);
@@ -332,6 +337,28 @@ function Editor({ initial, role, email, accountId }: { initial: SiteContent; rol
     }
   }
 
+  async function refreshAfterSync() {
+    try {
+      const response = await fetch("/api/site-content", { cache: "no-store" });
+      if (!response.ok) throw new Error("无法刷新编辑页");
+      const latest = await response.json() as SiteContent;
+      if (JSON.stringify(contentRef.current) !== savedRef.current) {
+        setStatus("同步完成，但编辑页有新的未保存修改；请先核对并保存。");
+        return;
+      }
+      savedRef.current = JSON.stringify(latest);
+      contentRef.current = latest;
+      undoRef.current = [];
+      redoRef.current = [];
+      setContent(latest);
+      setHistory({ undo: false, redo: false });
+      setDirty(false);
+      setStatus("同步完成。编辑页已更新为最新内容。");
+    } catch {
+      setStatus("同步完成。请刷新编辑页查看最新内容。");
+    }
+  }
+
   function applyMerged(merged: SiteContent, theirs: SiteContent) {
     undoRef.current.push(contentRef.current);
     redoRef.current = [];
@@ -425,8 +452,10 @@ function Editor({ initial, role, email, accountId }: { initial: SiteContent; rol
   </>;
 
   return <main className="editor-page">
-    <div className="editor-top"><div><p className="editor-eyebrow">SITE EDITOR / {import.meta.env.DEV ? "本地编辑" : "在线编辑"}</p><h1>编辑科研团队网站</h1><p>边改边看效果；确认后点击“保存全部修改”，{import.meta.env.DEV ? "本地预览刷新后就会更新。同步到线上须再到“同步与发布”审核。" : "网站页面刷新后就会更新。"}</p></div><div className="editor-account-links"><span>{email}</span><a href="/" target="_blank" rel="noopener noreferrer">打开网站 ↗</a>{role === "owner" ? <><a href="/editor-ai">管理员起草助手</a><a href="/editor-sync">同步与发布</a><a href="/editor-members">管理临时成员</a></> : <><a href="/editor-account">修改密码</a><button type="button" onClick={async () => { await fetch("/api/editor-session", { method: "DELETE" }); window.location.assign("/editor-login"); }}>退出登录</button></>}</div></div>
-    <div className="editor-sticky"><span role="status" className={dirty ? "is-dirty" : ""}>{status || (import.meta.env.DEV ? "修改将保存在本地预览" : "修改将保存在在线网站")}</span><div className="editor-sticky-actions"><button type="button" className="editor-history" onClick={() => restore("undo")} disabled={!history.undo} title="撤销上一步修改">撤销</button><button type="button" className="editor-history" onClick={() => restore("redo")} disabled={!history.redo} title="恢复已撤销的修改">重做</button><button type="button" onClick={() => void save()} disabled={busy || !dirty}>{busy ? "保存中…" : dirty ? "保存全部修改" : "已保存"}</button></div></div>
+    <div className="editor-top"><div><p className="editor-eyebrow">SITE EDITOR / {environment === "local" ? "本地编辑" : "在线编辑"}</p><h1>编辑科研团队网站</h1><p>边改边看效果；确认后点击“保存全部修改”。管理员保存后可在下方一键{environment === "local" ? "同步到线上" : "同步到本地"}。</p></div><div className="editor-account-links"><span>{email}</span><a href="/" target="_blank" rel="noopener noreferrer">打开网站 ↗</a>{role === "owner" ? <><a href="/editor-ai">管理员起草助手</a><a href="/editor-sync">同步详情与备份</a><a href="/editor-members">管理临时成员</a></> : <><a href="/editor-account">修改密码</a><button type="button" onClick={async () => { await fetch("/api/editor-session", { method: "DELETE" }); window.location.assign("/editor-login"); }}>退出登录</button></>}</div></div>
+    <div className="editor-sticky"><span role="status" className={dirty ? "is-dirty" : ""}>{status || (environment === "local" ? "修改将保存在本地预览" : "修改将保存在在线网站")}</span><div className="editor-sticky-actions"><button type="button" className="editor-history" onClick={() => restore("undo")} disabled={!history.undo} title="撤销上一步修改">撤销</button><button type="button" className="editor-history" onClick={() => restore("redo")} disabled={!history.redo} title="恢复已撤销的修改">重做</button><button type="button" onClick={() => void save()} disabled={busy || !dirty}>{busy ? "保存中…" : dirty ? "保存全部修改" : "已保存"}</button>{role === "owner" && <SyncWorkspace compact environment={environment} peerOrigin={peerOrigin} localDataDir=""
+      hasOnlineBase={environment === "online" || Boolean(initial.syncBaseRevision)}
+      canStart={!busy && !dirty && !pendingMerge} onSynchronized={() => void refreshAfterSync()} />}</div></div>
     {recovery && <div className="editor-recovery" role="status">发现上次保存冲突时暂存的草稿。<button type="button" onClick={restoreConflictDraft}>恢复并核对</button><button type="button" onClick={() => { sessionStorage.removeItem(draftKey); setRecovery(null); }}>放弃草稿</button></div>}
     <nav className="editor-jump" aria-label="快速定位编辑栏目">{[["home", "首页"], ["appearance", "字体与图片"], ["members", "团队成员"], ["directions", "研究方向"], ["outcomes", "研究成果"], ["news", "团队动态"], ["news-posts", "新闻稿"], ["other", "其他"], ["custom", "自定义栏目"], ["contact", "联系我们"], ["sections", "栏目与底图"], ["pages", "详情页文字"]].map(([key, label]) => <button type="button" key={key} onClick={() => { if (key === "outcomes" || key === "news" || key === "other") { jump("archives"); setPreviewView(key); } else if (key === "custom" && content.customSections.length) { jump("custom", 0); } else { jump(key); } }}>{label}</button>)}</nav>
     <div className="editor-workspace">

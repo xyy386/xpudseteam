@@ -41,7 +41,7 @@ type ApplyResult = { ok?: boolean; revision?: string; backupId?: string; changed
 type BackupItem = { id: string; size: number; uploaded: string };
 type SourceSession = {
   nonce: string; popup: Window; phase: "opening" | "exporting" | "waiting" | "review" | "committing";
-  sourceRevision: string; timer: ReturnType<typeof setTimeout> | null;
+  sourceRevision: string; timer: ReturnType<typeof setTimeout> | null; prepared: Preview | null;
 };
 type TargetSession = {
   nonce: string; opener: Window; phase: "awaiting" | "previewing" | "prepared" | "applying" | "done";
@@ -60,8 +60,10 @@ async function jsonResult(response: Response): Promise<Record<string, unknown>> 
   catch { return {}; }
 }
 
-export default function SyncWorkspace({ environment, peerOrigin, localDataDir, hasOnlineBase }: {
+export default function SyncWorkspace({ environment, peerOrigin, localDataDir, hasOnlineBase,
+  compact = false, canStart = true, onSynchronized }: {
   environment: SyncEnvironment; peerOrigin: string; localDataDir: string; hasOnlineBase: boolean;
+  compact?: boolean; canStart?: boolean; onSynchronized?: () => void | Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
   const [baseReady, setBaseReady] = useState(hasOnlineBase);
@@ -70,8 +72,13 @@ export default function SyncWorkspace({ environment, peerOrigin, localDataDir, h
   const [backups, setBackups] = useState<BackupItem[]>([]);
   const [lastResult, setLastResult] = useState<{ changedSections: string[]; backupId: string } | null>(null);
   const [review, setReview] = useState<Preview | null>(null);
+  const [synced, setSynced] = useState(false);
   const sourceRef = useRef<SourceSession | null>(null);
   const targetRef = useRef<TargetSession | null>(null);
+  const canStartRef = useRef(canStart);
+  const onSynchronizedRef = useRef(onSynchronized);
+  canStartRef.current = canStart;
+  onSynchronizedRef.current = onSynchronized;
 
   async function refreshBackups() {
     try {
@@ -83,8 +90,41 @@ export default function SyncWorkspace({ environment, peerOrigin, localDataDir, h
     } catch { /* Backup history is optional for page rendering. */ }
   }
 
+  async function commitPrepared(session: SourceSession) {
+    if (sourceRef.current !== session || session.phase !== "review"
+      || !session.prepared?.canApply || !session.prepared.backupVerified) return;
+    if (!canStartRef.current) {
+      sourceRef.current = null; setBusy(false); setReview(null);
+      setMessage("编辑页出现未保存的修改。请先保存，再重新同步。");
+      session.popup.postMessage(bridgeMessage(session.nonce, "error", { error: "来源出现未保存的修改" }), peerOrigin);
+      return;
+    }
+    session.phase = "committing";
+    setMessage("正在复核来源修订并自动应用已验证的内容…");
+    try {
+      const response = await fetch("/api/site-content", { cache: "no-store" });
+      if (!response.ok) throw new Error("无法复核本站最新修订");
+      const current = await response.json() as { revision?: string };
+      if (current.revision !== session.sourceRevision) throw new Error("来源内容在预检期间发生变化，请重新同步");
+      setReview(null);
+      session.timer = setTimeout(() => {
+        if (sourceRef.current === session) {
+          sourceRef.current = null; setBusy(false);
+          setMessage("目标应用超时。请先查看目标窗口的实际状态，避免重复操作。");
+        }
+      }, 120_000);
+      session.popup.postMessage(bridgeMessage(session.nonce, "commit"), peerOrigin);
+    } catch (error) {
+      if (session.timer) clearTimeout(session.timer);
+      sourceRef.current = null; setBusy(false); setReview(null);
+      const reason = error instanceof Error ? error.message : "来源修订复核失败";
+      setMessage(reason);
+      session.popup.postMessage(bridgeMessage(session.nonce, "error", { error: reason }), peerOrigin);
+    }
+  }
+
   useEffect(() => {
-    void refreshBackups();
+    if (!compact) void refreshBackups();
     const hash = new URLSearchParams(window.location.hash.slice(1));
     const nonce = hash.get("syncNonce");
     if (nonce && /^[a-f0-9-]{36}$/.test(nonce)) {
@@ -152,7 +192,7 @@ export default function SyncWorkspace({ environment, peerOrigin, localDataDir, h
         if (session.timer) clearTimeout(session.timer);
         session.timer = null;
         session.phase = "review";
-        setReview({
+        const preview: Preview = {
           canApply: message.canApply, warning: message.canApply ? "" : "发现双方修改同一位置，请先人工核对。",
           sourceRevision: message.sourceRevision,
           targetRevision: message.targetRevision, changedSections: message.changedSections,
@@ -160,10 +200,21 @@ export default function SyncWorkspace({ environment, peerOrigin, localDataDir, h
           conflicts: message.conflicts,
           assetCount: message.assetCount!, assetBytes: message.assetBytes!,
           backupId: message.backupId, backupVerified: message.backupVerified,
-        });
-        setMessage(message.canApply
-          ? "目标已完成附件校验和自动备份。请核对下方路径，再明确确认应用。"
-          : "发现冲突，目标未被修改。请查看冲突路径并人工核对。");
+        };
+        session.prepared = preview;
+        if (compact && message.canApply) {
+          setMessage("预检、附件校验和目标备份已通过，正在自动同步…");
+          void commitPrepared(session);
+        } else {
+          setReview(preview);
+          setMessage(message.canApply
+            ? "目标已完成附件校验和自动备份。请核对下方路径，再明确确认应用。"
+            : "发现冲突，目标未被修改。请查看冲突路径并人工核对。");
+          if (compact && !message.canApply) {
+            sourceRef.current = null;
+            setBusy(false);
+          }
+        }
         return;
       }
       if (message.action === "complete" && session.phase === "committing") {
@@ -183,13 +234,25 @@ export default function SyncWorkspace({ environment, peerOrigin, localDataDir, h
             });
             if (!response.ok) throw new Error(resultError(await jsonResult(response), "本地内容更新失败"));
             setBaseReady(true);
-            setMessage("同步到线上完成；本地已接收线上其他更新，两边内容一致。两边原内容均有备份。");
+            setMessage(compact
+              ? "同步完成。本地已接收线上其他更新，两边内容一致。目标网页已在新窗口打开。"
+              : "同步完成。本地已接收线上其他更新，两边内容一致。两边原内容均有备份。");
+            setSynced(true);
+            void onSynchronizedRef.current?.();
+            if (compact) try { session.popup.location.href = peerOrigin + "/"; } catch { /* The target link remains available. */ }
           } catch {
             setMessage("线上已更新，但本地未能接收更新后快照。请从线上同步到本地并核对，再做下一次修改。");
           }
-        } else setMessage("同步到本地完成；本地原内容已自动备份。");
+        } else {
+          setMessage(compact
+            ? "同步完成。本地原内容已自动备份。目标网页已在新窗口打开。"
+            : "同步完成。本地原内容已自动备份。");
+          setSynced(true);
+          void onSynchronizedRef.current?.();
+          if (compact) try { session.popup.location.href = peerOrigin + "/"; } catch { /* The target link remains available. */ }
+        }
         setLastResult({ changedSections: message.changedSections ?? [], backupId: message.backupId ?? "" });
-        void refreshBackups();
+        if (!compact) void refreshBackups();
       }
     }
 
@@ -221,7 +284,7 @@ export default function SyncWorkspace({ environment, peerOrigin, localDataDir, h
             assetBytes: result.assetBytes, backupId: result.backupId, backupVerified: result.backupVerified,
           }), peerOrigin);
           setMessage(result.canApply
-            ? "目标备份已完成，等待管理员在发起页审核改动路径并确认。"
+            ? "目标备份已完成，正在等待发起页继续同步。"
             : "发现同一位置被双方修改。请在发起页查看冲突路径；目标未被修改。");
         } catch (error) { targetFailed(session, error instanceof Error ? error.message : "预检失败"); }
         return;
@@ -277,10 +340,13 @@ export default function SyncWorkspace({ environment, peerOrigin, localDataDir, h
       window.removeEventListener("message", onMessage);
       if (sourceRef.current?.timer) clearTimeout(sourceRef.current.timer);
     };
-  }, [environment, peerOrigin]);
+  }, [environment, peerOrigin, compact]);
 
   function startSync() {
     if (busy || bridgeTarget) return;
+    if (!canStartRef.current) { setMessage("请先保存全部修改，再点击同步。"); return; }
+    setSynced(false);
+    setReview(null);
     setLastResult(null);
     const nonce = crypto.randomUUID();
     const destination = peerOrigin + "/editor-sync#syncNonce=" + encodeURIComponent(nonce);
@@ -289,7 +355,7 @@ export default function SyncWorkspace({ environment, peerOrigin, localDataDir, h
       setMessage("浏览器阻止了同步窗口。请允许本站打开新窗口后重试。");
       return;
     }
-    const session: SourceSession = { nonce, popup, phase: "opening", sourceRevision: "", timer: null };
+    const session: SourceSession = { nonce, popup, phase: "opening", sourceRevision: "", timer: null, prepared: null };
     session.timer = setTimeout(() => {
       if (sourceRef.current === session) {
         sourceRef.current = null; setBusy(false);
@@ -305,29 +371,7 @@ export default function SyncWorkspace({ environment, peerOrigin, localDataDir, h
 
   async function confirmSync() {
     const session = sourceRef.current;
-    if (!session || session.phase !== "review" || !review?.canApply || !review.backupVerified) return;
-    session.phase = "committing";
-    setMessage("正在确认来源修订，然后由目标应用已审核的内容…");
-    try {
-      const response = await fetch("/api/site-content", { cache: "no-store" });
-      if (!response.ok) throw new Error("无法复核本站最新修订");
-      const current = await response.json() as { revision?: string };
-      if (current.revision !== session.sourceRevision) throw new Error("来源内容在审核期间发生变化，请重新同步");
-      setReview(null);
-      session.timer = setTimeout(() => {
-        if (sourceRef.current === session) {
-          sourceRef.current = null; setBusy(false);
-          setMessage("目标应用超时。请先查看目标窗口的实际状态，避免重复操作。");
-        }
-      }, 120_000);
-      session.popup.postMessage(bridgeMessage(session.nonce, "commit"), peerOrigin);
-    } catch (error) {
-      if (session.timer) clearTimeout(session.timer);
-      sourceRef.current = null; setBusy(false); setReview(null);
-      const reason = error instanceof Error ? error.message : "来源修订复核失败";
-      setMessage(reason);
-      session.popup.postMessage(bridgeMessage(session.nonce, "error", { error: reason }), peerOrigin);
-    }
+    if (session) await commitPrepared(session);
   }
 
   function cancelSync() {
@@ -381,6 +425,21 @@ export default function SyncWorkspace({ environment, peerOrigin, localDataDir, h
     } catch (error) { setMessage(error instanceof Error ? error.message : "恢复失败"); }
     finally { setBusy(false); }
   }
+
+  if (compact) return <div className="editor-quick-sync">
+    <button type="button" disabled={busy || !canStart} onClick={startSync}
+      title={!canStart ? "请先保存全部修改，再同步" : undefined}>
+      {busy ? "同步中…" : environment === "online" ? "同步到本地" : "同步到线上"}
+    </button>
+    {!canStart && <span className="editor-quick-sync-hint">请先保存全部修改</span>}
+    {message && <span role="status" className="editor-quick-sync-message">{message}</span>}
+    {synced && <a href={peerOrigin + "/"} target="_blank" rel="noopener noreferrer">查看目标网页 ↗</a>}
+    {review && !review.canApply && <div role="alert" className="editor-quick-sync-conflict">
+      <strong>同步已停止，目标内容未改动。</strong>
+      {review.conflicts.length > 0 && <p>冲突位置：{review.conflicts.map(describePath).join("；")}</p>}
+      <a href="/editor-sync">查看同步详情与备份</a>
+    </div>}
+  </div>;
 
   return <div className="editor-sync-workspace">
     <section className="editor-sync-step">

@@ -502,6 +502,14 @@ footer{background:#dceaf3;border-color:#bcd2df}
 .editor-sticky-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .editor-sticky-actions .editor-history{background:#fff;color:#245a79;border-color:#a6c3d5;padding:9px 13px}
 .editor-sticky-actions .editor-history:disabled{opacity:.4;cursor:not-allowed}
+.editor-quick-sync{display:flex;align-items:center;gap:8px;flex-wrap:wrap;max-width:460px}
+.editor-quick-sync>button{background:#08795f;border-color:#08795f;font-weight:700}
+.editor-quick-sync>button:disabled{cursor:not-allowed}
+.editor-quick-sync-hint,.editor-quick-sync-message{font-size:.8rem;color:#5c6f79}
+.editor-quick-sync-message{flex-basis:100%;line-height:1.35}
+.editor-quick-sync>a,.editor-quick-sync-conflict a{font-size:.83rem;color:#075f8f;text-decoration:underline}
+.editor-quick-sync-conflict{flex-basis:100%;font-size:.83rem;color:#9c3425;line-height:1.45}
+.editor-quick-sync-conflict p{margin:4px 0;overflow-wrap:anywhere}
 .editor-jump{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px}
 .editor-jump button{border:1px solid #b3cedd;background:#f8fcfe;color:#205a7b;padding:9px 12px;cursor:pointer;font-size:.83rem}
 .editor-jump button:hover,.editor-jump button:focus-visible{border-color:#287da8;background:#e4f3fb}

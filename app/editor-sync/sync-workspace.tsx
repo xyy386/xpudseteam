@@ -339,6 +339,30 @@ export default function SyncWorkspace({ environment, peerOrigin, localDataDir, h
     session.popup.postMessage(bridgeMessage(session.nonce, "error", { error: "管理员取消了本次同步" }), peerOrigin);
   }
 
+  async function downloadCurrentBackup() {
+    if (busy) return;
+    setBusy(true); setMessage("正在核对内容与附件并生成完整备份…");
+    try {
+      const created = await fetch("/api/site-snapshot?action=backup-current", { method: "POST" });
+      const result = await created.json() as { ok?: boolean; backupId?: string; error?: string };
+      if (!created.ok || !result.ok || !result.backupId) throw new Error(result.error || "备份生成失败");
+      const response = await fetch("/api/site-snapshot?action=backup&id=" + encodeURIComponent(result.backupId));
+      if (!response.ok) throw new Error(resultError(await jsonResult(response), "备份读取失败"));
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "site-backup-" + result.backupId + ".json";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      setMessage("完整备份已保存在本站，编号 " + result.backupId + "；浏览器也已开始下载副本。");
+      void refreshBackups();
+    } catch (error) { setMessage(error instanceof Error ? error.message : "备份失败"); }
+    finally { setBusy(false); }
+  }
+
   async function restoreBackup(id: string) {
     if (busy || !window.confirm("要用这份备份替换当前环境的内容吗？系统会先自动备份当前内容。")) return;
     setBusy(true); setMessage("正在核对当前修订并恢复备份…");
@@ -399,7 +423,9 @@ export default function SyncWorkspace({ environment, peerOrigin, localDataDir, h
       <p>若要更改目录，请在项目文件夹双击“选择本地数据位置.command”，在系统文件夹选择器里选定位置。工具会暂停预览、完整复制并校验数据、重启预览；旧目录保留为备份。网页本身无法直接写入任意磁盘路径。</p>
     </section>}
     <details className="editor-sync-preview"><summary>查看或恢复本环境备份</summary>
-      <p><a href="/api/site-snapshot">下载当前环境完整备份（内容与引用附件）</a></p>
+      <p><button type="button" disabled={busy} onClick={() => void downloadCurrentBackup()}>
+        生成并下载当前完整备份（内容与引用附件）
+      </button></p>
       {backups.length ? <ul>{backups.map((item) => <li key={item.id}>
         <span>{new Date(item.uploaded).toLocaleString("zh-CN")} · {(item.size / 1024 / 1024).toFixed(2)} MB </span>
         <a href={"/api/site-snapshot?action=backup&id=" + encodeURIComponent(item.id)}>下载</a>

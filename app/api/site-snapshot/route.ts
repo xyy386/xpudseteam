@@ -268,6 +268,10 @@ export async function POST(request: Request) {
   if (!db || !bucket) return Response.json({ error: "内容或附件存储暂不可用" }, { status: 503 });
   const action = new URL(request.url).searchParams.get("action");
   try {
+    if (action === "backup-current") {
+      const backupId = await saveBackup(await getSiteContent(), bucket);
+      return Response.json({ ok: true, backupId }, { headers: { "Cache-Control": "no-store" } });
+    }
     if (action === "restore") {
       const data = await request.json() as { backupId?: unknown };
       if (typeof data.backupId !== "string") throw new SyncError("备份编号无效", 400);

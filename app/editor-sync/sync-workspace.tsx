@@ -1,110 +1,357 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { SyncEnvironment } from "../sync-environment";
 
-type Preview = {
-  origin: "local" | "online"; sourceRevision: string; baseOnlineRevision: string; targetRevision: string;
-  assetCount: number; assetBytes: number; changedSections: string[]; canApply: boolean; warning: string;
-};
-
+const CHANNEL = "research-site-sync-v1";
+const MAX_MESSAGE_LENGTH = 50 * 1024 * 1024;
 const sectionNames: Record<string, string> = {
-  siteName: "网站名称", institution: "机构信息", contact: "联系信息", contactDetails: "联系方式",
-  hero: "首页", sectionTitles: "栏目标题", sectionIntros: "栏目介绍", pageText: "页面文字",
-  backgrounds: "背景图片", backgroundVisibility: "背景显示", appearance: "电脑样式",
-  appearanceMobile: "手机样式", members: "团队成员", directions: "研究方向",
-  archives: "成果与新闻", customSections: "自定义栏目",
+  siteName: "网站名称", institution: "单位信息", contact: "联系信息", contactDetails: "联系详情",
+  hero: "首页横幅", sectionTitles: "栏目标题", sectionIntros: "栏目介绍", pageText: "页面文字",
+  backgrounds: "栏目背景", backgroundVisibility: "背景效果", appearance: "电脑端样式",
+  appearanceMobile: "手机端样式", members: "团队成员", directions: "研究方向",
+  archives: "新闻与资料", customSections: "自定义栏目",
 };
 
-export default function SyncWorkspace({ environment }: { environment: "local" | "online" }) {
-  const [file, setFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<Preview | null>(null);
-  const [backupDownloaded, setBackupDownloaded] = useState(false);
-  const [reviewed, setReviewed] = useState(false);
+function describeSections(sections: string[]): string {
+  return sections.length ? sections.map((section) => sectionNames[section] ?? section).join("、") : "内容相同";
+}
+
+type BridgeMessage = {
+  channel: typeof CHANNEL; nonce: string;
+  action: "ready" | "snapshot" | "prepared" | "commit" | "complete" | "error";
+  role?: SyncEnvironment; snapshotText?: string; sourceRevision?: string;
+  targetRevision?: string; revision?: string; backupId?: string;
+  changedSections?: string[]; assetCount?: number; assetBytes?: number;
+  backupVerified?: boolean; error?: string;
+};
+type Preview = {
+  canApply: boolean; warning: string; sourceRevision: string; targetRevision: string;
+  changedSections: string[]; assetCount: number; assetBytes: number;
+  backupId: string; backupVerified: boolean;
+};
+type ApplyResult = { ok?: boolean; revision?: string; backupId?: string; changedSections?: string[]; error?: string };
+type BackupItem = { id: string; size: number; uploaded: string };
+type SourceSession = {
+  nonce: string; popup: Window; phase: "opening" | "exporting" | "waiting" | "review" | "committing";
+  sourceRevision: string; timer: ReturnType<typeof setTimeout> | null;
+};
+type TargetSession = {
+  nonce: string; opener: Window; phase: "awaiting" | "previewing" | "prepared" | "applying" | "done";
+  snapshotText: string; targetRevision: string; backupId: string;
+};
+
+function bridgeMessage(nonce: string, action: BridgeMessage["action"], more: Partial<BridgeMessage> = {}): BridgeMessage {
+  return { channel: CHANNEL, nonce, action, ...more };
+}
+function resultError(value: unknown, fallback: string): string {
+  return value && typeof value === "object" && "error" in value && typeof value.error === "string"
+    ? value.error : fallback;
+}
+async function jsonResult(response: Response): Promise<Record<string, unknown>> {
+  try { return await response.json() as Record<string, unknown>; }
+  catch { return {}; }
+}
+
+export default function SyncWorkspace({ environment, peerOrigin, localDataDir }: { environment: SyncEnvironment; peerOrigin: string; localDataDir: string }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [bridgeTarget, setBridgeTarget] = useState(false);
+  const [backups, setBackups] = useState<BackupItem[]>([]);
+  const [lastResult, setLastResult] = useState<{ changedSections: string[]; backupId: string } | null>(null);
+  const [review, setReview] = useState<Preview | null>(null);
+  const sourceRef = useRef<SourceSession | null>(null);
+  const targetRef = useRef<TargetSession | null>(null);
 
-  async function downloadSnapshot(purpose: "export" | "backup") {
-    setBusy(true); setMessage("正在打包内容和附件…");
+  async function refreshBackups() {
     try {
-      const response = await fetch("/api/site-snapshot", { cache: "no-store" });
-      if (!response.ok) throw new Error((await response.json() as { error?: string }).error || "快照下载失败");
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `site-snapshot-${environment}-${purpose}-${new Date().toISOString().slice(0, 10)}.json`;
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
-      if (purpose === "backup") setBackupDownloaded(true);
-      setMessage(purpose === "backup"
-        ? `当前环境备份已下载（${(blob.size / 1024 / 1024).toFixed(2)} MB），请保管好，再确认应用。`
-        : `传递文件已下载（${(blob.size / 1024 / 1024).toFixed(2)} MB），请带到另一环境的同步页。`);
-    } catch (error) { setMessage(error instanceof Error ? error.message : "快照下载失败"); }
+      const response = await fetch("/api/site-snapshot?action=backups", { cache: "no-store" });
+      if (response.ok) {
+        const result = await response.json() as { items?: BackupItem[] };
+        setBackups(result.items ?? []);
+      }
+    } catch { /* Backup history is optional for page rendering. */ }
+  }
+
+  useEffect(() => {
+    void refreshBackups();
+    const hash = new URLSearchParams(window.location.hash.slice(1));
+    const nonce = hash.get("syncNonce");
+    if (nonce && /^[a-f0-9-]{36}$/.test(nonce)) {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      if (window.opener) {
+        targetRef.current = { nonce, opener: window.opener, phase: "awaiting", snapshotText: "", targetRevision: "", backupId: "" };
+        setBridgeTarget(true); setBusy(true);
+        setMessage("已连接到同步发起页，正在等待内容与附件…");
+        window.opener.postMessage(bridgeMessage(nonce, "ready", { role: environment }), peerOrigin);
+      } else setMessage("浏览器没有保留同步窗口连接。请返回原页面，再点击同步按钮。");
+    }
+
+    function sourceFailed(session: SourceSession, reason: string) {
+      if (session.timer) clearTimeout(session.timer);
+      if (sourceRef.current !== session) return;
+      sourceRef.current = null;
+      setBusy(false); setReview(null); setMessage(reason);
+      try { session.popup.postMessage(bridgeMessage(session.nonce, "error", { error: reason }), peerOrigin); }
+      catch { /* The other window may already be closed. */ }
+    }
+    function targetFailed(session: TargetSession, reason: string) {
+      if (targetRef.current !== session) return;
+      session.phase = "done";
+      setBusy(false); setMessage(reason);
+      try { session.opener.postMessage(bridgeMessage(session.nonce, "error", { error: reason }), peerOrigin); }
+      catch { /* The source window may already be closed. */ }
+    }
+
+    async function handleSource(message: BridgeMessage, session: SourceSession) {
+      if (message.action === "error") {
+        sourceFailed(session, message.error || "目标环境未能完成同步");
+        return;
+      }
+      if (message.action === "ready" && session.phase === "opening") {
+        if (message.role === environment) return sourceFailed(session, "同步目标环境不正确");
+        if (session.timer) clearTimeout(session.timer);
+        session.timer = setTimeout(() => sourceFailed(session, "同步等待超时。请在目标窗口确认登录和网络连接。"), 120_000);
+        session.phase = "exporting";
+        setMessage("目标环境已连接，正在读取本站内容与附件…");
+        try {
+          const response = await fetch("/api/site-snapshot", { cache: "no-store" });
+          if (!response.ok) throw new Error(resultError(await jsonResult(response), "本站快照读取失败"));
+          const snapshotText = await response.text();
+          if (snapshotText.length > MAX_MESSAGE_LENGTH) throw new Error("内容与附件超过同步上限");
+          const snapshot = JSON.parse(snapshotText) as { content?: { revision?: string }; origin?: string };
+          if (typeof snapshot.content?.revision !== "string" || snapshot.origin !== environment) throw new Error("本站快照格式不正确");
+          session.sourceRevision = snapshot.content.revision;
+          session.phase = "waiting";
+          session.popup.postMessage(bridgeMessage(session.nonce, "snapshot", { snapshotText, sourceRevision: session.sourceRevision }), peerOrigin);
+          setMessage("内容已安全传至目标页面，正在检查冲突并自动备份…");
+        } catch (error) { sourceFailed(session, error instanceof Error ? error.message : "快照传递失败"); }
+        return;
+      }
+      if (message.action === "prepared" && session.phase === "waiting") {
+        if (!message.backupVerified || !message.backupId || message.sourceRevision !== session.sourceRevision
+          || typeof message.targetRevision !== "string" || !Array.isArray(message.changedSections)
+          || !Number.isInteger(message.assetCount) || !Number.isInteger(message.assetBytes)) {
+          return sourceFailed(session, "目标预检信息不完整，已取消同步");
+        }
+        if (session.timer) clearTimeout(session.timer);
+        session.timer = null;
+        session.phase = "review";
+        setReview({
+          canApply: true, warning: "", sourceRevision: message.sourceRevision,
+          targetRevision: message.targetRevision, changedSections: message.changedSections,
+          assetCount: message.assetCount!, assetBytes: message.assetBytes!,
+          backupId: message.backupId, backupVerified: true,
+        });
+        setMessage("目标已完成附件校验和自动备份。请核对下方信息，再明确确认应用。");
+        return;
+      }
+      if (message.action === "complete" && session.phase === "committing") {
+        if (session.timer) clearTimeout(session.timer);
+        sourceRef.current = null; setBusy(false); setReview(null);
+        if (environment === "local" && message.revision) {
+          try {
+            const response = await fetch("/api/site-snapshot?action=ack", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ expectedRevision: session.sourceRevision, onlineRevision: message.revision }),
+            });
+            if (!response.ok) throw new Error(resultError(await jsonResult(response), "本地基准更新失败"));
+            setMessage("同步到线上完成；本地基准已更新。目标已自动保存原内容备份。");
+          } catch {
+            setMessage("线上已更新，但本地在同步期间又有改动。请先核对两边内容，再进行下一次同步。");
+          }
+        } else setMessage("同步到本地完成；本地原内容已自动备份。");
+        setLastResult({ changedSections: message.changedSections ?? [], backupId: message.backupId ?? "" });
+        void refreshBackups();
+      }
+    }
+
+    async function handleTarget(message: BridgeMessage, session: TargetSession) {
+      if (message.action === "error") return targetFailed(session, message.error || "来源环境取消了同步");
+      if (message.action === "snapshot" && session.phase === "awaiting") {
+        session.phase = "previewing";
+        setMessage("已收到来源内容，正在校验文件、附件和修订…");
+        try {
+          if (!message.snapshotText || message.snapshotText.length > MAX_MESSAGE_LENGTH) throw new Error("同步内容超过上限或为空");
+          const snapshot = JSON.parse(message.snapshotText) as { origin?: string; content?: { revision?: string } };
+          if (snapshot.origin === environment || typeof snapshot.content?.revision !== "string"
+            || snapshot.content.revision !== message.sourceRevision) throw new Error("来源环境或修订信息不正确");
+          session.snapshotText = message.snapshotText;
+          const response = await fetch("/api/site-snapshot?action=prepare", {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: session.snapshotText,
+          });
+          const result = await response.json() as Preview & { error?: string };
+          if (!response.ok || !result.canApply) throw new Error(result.error || result.warning || "预检未通过");
+          session.targetRevision = result.targetRevision;
+          session.backupId = result.backupId;
+          session.phase = "prepared";
+          session.opener.postMessage(bridgeMessage(session.nonce, "prepared", {
+            sourceRevision: result.sourceRevision, targetRevision: result.targetRevision,
+            changedSections: result.changedSections, assetCount: result.assetCount,
+            assetBytes: result.assetBytes, backupId: result.backupId, backupVerified: result.backupVerified,
+          }), peerOrigin);
+          setMessage("附件校验和目标备份已完成，等待管理员在发起页审核并确认。");
+        } catch (error) { targetFailed(session, error instanceof Error ? error.message : "预检失败"); }
+        return;
+      }
+      if (message.action === "commit" && session.phase === "prepared") {
+        session.phase = "applying";
+        setMessage("目标备份已保存，正在导入图片、附件和正文…");
+        try {
+          const response = await fetch("/api/site-snapshot?action=apply", {
+            method: "POST", headers: { "Content-Type": "application/json", "X-Expected-Revision": session.targetRevision,
+              "X-Prepared-Backup-Id": session.backupId },
+            body: session.snapshotText,
+          });
+          const result = await response.json() as ApplyResult;
+          if (!response.ok || !result.ok || !result.revision) throw new Error(result.error || "目标应用失败");
+          session.phase = "done"; setBusy(false);
+          setMessage("同步完成。原有内容已自动备份，可以在下方查看和恢复。");
+          setLastResult({ changedSections: result.changedSections ?? [], backupId: result.backupId ?? "" });
+          void refreshBackups();
+          session.opener.postMessage(bridgeMessage(session.nonce, "complete", {
+            revision: result.revision, backupId: result.backupId, changedSections: result.changedSections,
+          }), peerOrigin);
+        } catch (error) { targetFailed(session, error instanceof Error ? error.message : "应用失败"); }
+      }
+    }
+
+    function onMessage(event: MessageEvent) {
+      if (event.origin !== peerOrigin || !event.data || typeof event.data !== "object") return;
+      const message = event.data as BridgeMessage;
+      if (message.channel !== CHANNEL || !/^[a-f0-9-]{36}$/.test(message.nonce)) return;
+      const source = sourceRef.current;
+      if (source && event.source === source.popup && message.nonce === source.nonce) {
+        void handleSource(message, source);
+        return;
+      }
+      const target = targetRef.current;
+      if (target && event.source === target.opener && message.nonce === target.nonce) void handleTarget(message, target);
+    }
+    window.addEventListener("message", onMessage);
+    return () => {
+      window.removeEventListener("message", onMessage);
+      if (sourceRef.current?.timer) clearTimeout(sourceRef.current.timer);
+    };
+  }, [environment, peerOrigin]);
+
+  function startSync() {
+    if (busy || bridgeTarget) return;
+    setLastResult(null);
+    const nonce = crypto.randomUUID();
+    const destination = peerOrigin + "/editor-sync#syncNonce=" + encodeURIComponent(nonce);
+    const popup = window.open(destination, "_blank");
+    if (!popup) {
+      setMessage("浏览器阻止了同步窗口。请允许本站打开新窗口后重试。");
+      return;
+    }
+    const session: SourceSession = { nonce, popup, phase: "opening", sourceRevision: "", timer: null };
+    session.timer = setTimeout(() => {
+      if (sourceRef.current === session) {
+        sourceRef.current = null; setBusy(false);
+        setMessage(environment === "online"
+          ? "本地预览未能连接。请双击“启动本地预览.command”后重试；也请确认目标窗口已登录。"
+          : "线上同步页未能连接。请检查网络、目标窗口登录状态，以及线上是否已部署新版。");
+      }
+    }, 18_000);
+    sourceRef.current = session;
+    setBusy(true);
+    setMessage("已打开目标窗口，正在等待管理员登录和页面连接…");
+  }
+
+  async function confirmSync() {
+    const session = sourceRef.current;
+    if (!session || session.phase !== "review" || !review?.backupVerified) return;
+    session.phase = "committing";
+    setMessage("正在确认来源修订，然后由目标应用已审核的内容…");
+    try {
+      const response = await fetch("/api/site-content", { cache: "no-store" });
+      if (!response.ok) throw new Error("无法复核本站最新修订");
+      const current = await response.json() as { revision?: string };
+      if (current.revision !== session.sourceRevision) throw new Error("来源内容在审核期间发生变化，请重新同步");
+      setReview(null);
+      session.timer = setTimeout(() => {
+        if (sourceRef.current === session) {
+          sourceRef.current = null; setBusy(false);
+          setMessage("目标应用超时。请先查看目标窗口的实际状态，避免重复操作。");
+        }
+      }, 120_000);
+      session.popup.postMessage(bridgeMessage(session.nonce, "commit"), peerOrigin);
+    } catch (error) {
+      if (session.timer) clearTimeout(session.timer);
+      sourceRef.current = null; setBusy(false); setReview(null);
+      const reason = error instanceof Error ? error.message : "来源修订复核失败";
+      setMessage(reason);
+      session.popup.postMessage(bridgeMessage(session.nonce, "error", { error: reason }), peerOrigin);
+    }
+  }
+
+  function cancelSync() {
+    const session = sourceRef.current;
+    if (!session || session.phase !== "review") return;
+    if (session.timer) clearTimeout(session.timer);
+    sourceRef.current = null; setBusy(false); setReview(null);
+    setMessage("已取消本次同步；目标内容未改动，预检备份会保留。");
+    session.popup.postMessage(bridgeMessage(session.nonce, "error", { error: "管理员取消了本次同步" }), peerOrigin);
+  }
+
+  async function restoreBackup(id: string) {
+    if (busy || !window.confirm("要用这份备份替换当前环境的内容吗？系统会先自动备份当前内容。")) return;
+    setBusy(true); setMessage("正在核对当前修订并恢复备份…");
+    try {
+      const currentResponse = await fetch("/api/site-content", { cache: "no-store" });
+      if (!currentResponse.ok) throw new Error("无法读取当前修订");
+      const current = await currentResponse.json() as { revision: string };
+      const response = await fetch("/api/site-snapshot?action=restore", {
+        method: "POST", headers: { "Content-Type": "application/json", "X-Expected-Revision": current.revision },
+        body: JSON.stringify({ backupId: id }),
+      });
+      const result = await response.json() as ApplyResult;
+      if (!response.ok || !result.ok) throw new Error(result.error || "恢复失败");
+      setMessage("备份已恢复。恢复前的内容也已自动备份，请刷新网站核对。");
+      void refreshBackups();
+    } catch (error) { setMessage(error instanceof Error ? error.message : "恢复失败"); }
     finally { setBusy(false); }
   }
 
-  async function inspect() {
-    if (!file) return;
-    setBusy(true); setPreview(null); setReviewed(false); setBackupDownloaded(false); setMessage("正在检查内容与附件完整性…");
-    try {
-      const response = await fetch("/api/site-snapshot?action=preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: await file.text() });
-      const result = await response.json() as Preview & { error?: string };
-      if (!response.ok) throw new Error(result.error || "快照预检失败");
-      setPreview(result);
-      setMessage(result.canApply ? "预检完成。请核对差异、下载当前环境备份，再决定是否应用。" : result.warning);
-    } catch (error) { setMessage(error instanceof Error ? error.message : "快照预检失败"); }
-    finally { setBusy(false); }
-  }
-
-  async function apply() {
-    if (!file || !preview || !preview.canApply || !backupDownloaded || !reviewed) return;
-    setBusy(true); setMessage("正在核对目标修订并导入附件…");
-    try {
-      const response = await fetch("/api/site-snapshot?action=apply", { method: "POST",
-        headers: { "Content-Type": "application/json", "X-Expected-Revision": preview.targetRevision }, body: await file.text() });
-      const result = await response.json() as { error?: string; importedAssets?: number };
-      if (!response.ok) throw new Error(result.error || "导入失败");
-      setPreview(null); setReviewed(false); setBackupDownloaded(false);
-      setMessage(`导入完成，新增 ${result.importedAssets ?? 0} 个附件。请打开编辑器和网站页面核对。`);
-    } catch (error) { setMessage(error instanceof Error ? error.message : "导入失败"); }
-    finally { setBusy(false); }
-  }
-
-  const importPanel = <section className="editor-sync-step">
-    <h2>{environment === "online" ? "第二步 · 审核并应用本地修改包" : "第一步 · 导入线上现有内容"}</h2>
-    <p>{environment === "online"
-      ? "选择本地导出的文件。页面会核对附件和线上修订；若线上已有新修改，会拒绝覆盖。"
-      : "选择线上下载的文件，先核对将改变的栏目，再应用到本地预览。"}</p>
-    <label className="editor-field"><span>选择{environment === "online" ? "本地修改包" : "线上快照"}文件</span><input type="file" accept=".json,application/json" onChange={(event) => {
-      setFile(event.target.files?.[0] ?? null); setPreview(null); setReviewed(false); setBackupDownloaded(false); setMessage("");
-    }} /></label>
-    <button type="button" onClick={() => void inspect()} disabled={!file || busy}>预检差异与附件</button>
-    {preview && <div className="editor-sync-preview"><h3>预检结果</h3>
-      <p>来源：{preview.origin === "online" ? "线上" : "本地"} · 附件 {preview.assetCount} 个（{(preview.assetBytes / 1024 / 1024).toFixed(2)} MB）</p>
-      <p>来源修订：<code>{preview.sourceRevision || "初始内容"}</code></p>
-      <p>目标当前修订：<code>{preview.targetRevision || "初始内容"}</code></p>
-      <p>已对齐的线上基准：<code>{preview.baseOnlineRevision || "未建立"}</code></p>
-      <p>将改变的部分：{preview.changedSections.length ? preview.changedSections.map((key) => sectionNames[key] || key).join("、") : "内容相同"}</p>
-      {preview.warning && <p role="alert" className="editor-sync-warning">{preview.warning}</p>}
-      {preview.canApply && <><button type="button" onClick={() => void downloadSnapshot("backup")} disabled={busy}>{backupDownloaded ? "重新下载当前环境备份" : "下载当前环境备份"}</button>
-        <label className="editor-sync-check"><input type="checkbox" checked={reviewed} onChange={(event) => setReviewed(event.target.checked)} />我已核对差异，并确认快照中的内容与附件可用于{environment === "online" ? "线上发布" : "本地预览"}。</label>
-        <button type="button" onClick={() => void apply()} disabled={busy || !reviewed || !backupDownloaded}>确认应用到{environment === "online" ? "线上网站" : "本地预览"}</button>
-        {!backupDownloaded && <p className="editor-help">应用前须先下载当前环境备份。</p>}
-      </>}
-    </div>}
-  </section>;
-  const exportPanel = <section className="editor-sync-step">
-    <h2>{environment === "online" ? "第一步 · 下载线上基准" : "第三步 · 导出本地修改包"}</h2>
-    <p>{environment === "online"
-      ? "将线上内容和引用的附件下载为一个文件，再在本地同步页导入。线上内容是修改基准。"
-      : "本地修改核对无误后，下载包含内容与附件的文件，带到线上同步页预检并明确应用。"}</p>
-    <button type="button" onClick={() => void downloadSnapshot("export")} disabled={busy}>{environment === "online" ? "下载线上内容与附件" : "下载本地修改包"}</button>
-  </section>;
   return <div className="editor-sync-workspace">
-    <p className="editor-help">当前使用手动快照传递：文件需由管理员在本地和线上页面间带入；不会在两个环境之间自动访问或覆盖内容。</p>
-    {environment === "online" ? <>{exportPanel}{importPanel}</> : <>{importPanel}
-      <section className="editor-sync-step"><h2>第二步 · 本地修改与预览</h2><p>在本地编辑器修改并保存，打开页面核对新闻稿和附件，再导出修改包。</p><a href="/edit">打开本地编辑器 →</a></section>
-      {exportPanel}</>}
-    {message && <p role="status">{message}</p>}
+    <section className="editor-sync-step">
+      <h2>{bridgeTarget ? "自动同步目标窗口" : environment === "online" ? "线上内容 → 本地预览" : "本地修改 → 线上网站"}</h2>
+      <p>{bridgeTarget ? "这个窗口由另一环境发起同步；正在校验内容和权限。请勿关闭。"
+        : environment === "online"
+          ? "线上编辑保存后，点击一次即可把网站内容、图片和附件传到本地。原本地内容会自动备份。"
+          : "本地编辑保存并核对后，点击一次即可同步到线上。若线上在此期间有新修改，将拒绝覆盖。"}</p>
+      {!bridgeTarget && <button type="button" disabled={busy} onClick={startSync}>
+        {busy ? "同步进行中…" : environment === "online" ? "同步到本地" : "同步到线上"}
+      </button>}
+      {environment === "online" && <p className="editor-help">本地预览须在同一台电脑运行。如果目标窗口无法打开，请先双击本地项目中的“启动本地预览.command”。</p>}
+      <p className="editor-help">浏览器将在另一环境打开管理员页面，通过限定来源的一次性窗口消息传递内容；两个页面各自使用自己的登录状态。不会传账号或密码。</p>
+    </section>
+    {message && <p role="status" className="editor-sync-status">{message}</p>}
+    {review && <section className="editor-sync-preview" aria-label="同步前审核">
+      <h2>同步前审核 · 尚未覆盖目标</h2>
+      <p>来源修订：<code>{review.sourceRevision || "初始内容"}</code></p>
+      <p>目标修订：<code>{review.targetRevision || "初始内容"}</code></p>
+      <p>将改变的部分：{describeSections(review.changedSections)}</p>
+      <p>附件完整性：已校验 {review.assetCount} 个附件（{(review.assetBytes / 1024 / 1024).toFixed(2)} MB）。</p>
+      <p>目标自动备份：已完成，编号 <code>{review.backupId}</code>。</p>
+      <div className="editor-sync-review-actions">
+        <button type="button" onClick={() => void confirmSync()}>确认应用到{environment === "local" ? "线上网站" : "本地预览"}</button>
+        <button type="button" onClick={cancelSync}>取消同步</button>
+      </div>
+    </section>}
+    {lastResult && <p>本次变更：{describeSections(lastResult.changedSections)}。{lastResult.backupId && "目标自动备份编号：" + lastResult.backupId}</p>}
+    {environment === "local" && <section className="editor-sync-step"><h2>本地资料存储位置</h2>
+      <p>页面内容、成员、研究方向、新闻稿、上传的图片与附件以及同步备份，统一保存在本地数据目录。项目源码位置与该目录分开。</p>
+      <p>当前实际目录：<code>{localDataDir || "尚未读取到目录配置"}</code></p>
+      <p>若要更改目录，请在项目文件夹双击“选择本地数据位置.command”，在系统文件夹选择器里选定位置。工具会暂停预览、完整复制并校验数据、重启预览；旧目录保留为备份。网页本身无法直接写入任意磁盘路径。</p>
+    </section>}
+    <details className="editor-sync-preview"><summary>查看或恢复本环境备份</summary>
+      {backups.length ? <ul>{backups.map((item) => <li key={item.id}>
+        <span>{new Date(item.uploaded).toLocaleString("zh-CN")} · {(item.size / 1024 / 1024).toFixed(2)} MB </span>
+        <a href={"/api/site-snapshot?action=backup&id=" + encodeURIComponent(item.id)}>下载</a>
+        <button type="button" disabled={busy} onClick={() => void restoreBackup(item.id)}>恢复</button>
+      </li>)}</ul> : <p>尚无自动备份。</p>}
+    </details>
   </div>;
 }

@@ -1,5 +1,5 @@
 import { notFound, redirect } from "next/navigation";
-import { getSiteContent } from "../../../content";
+import { getSiteContent, isPublishedArticle } from "../../../content";
 import { appearanceStyle } from "../../../appearance";
 import { MarkdownInline, MarkdownText } from "../../../markdown";
 
@@ -9,7 +9,7 @@ export default async function NewsArticlePage({ params }: { params: Promise<{ sl
   const content = await getSiteContent();
   const section = content.archives.find((item) => item.slug === slug);
   const article = section?.newsArticles.find((item) => item.id === articleId);
-  if (!section || !article) notFound();
+  if (!section || !article || !isPublishedArticle(article)) notFound();
   const isPdf = article.attachment.toLowerCase().split("?")[0].endsWith(".pdf");
   if (isPdf && article.attachment.startsWith("/api/news-file/")) {
     const query = new URLSearchParams({ preview: "1", name: article.attachmentName || `${article.title}.pdf` });
@@ -31,6 +31,7 @@ export default async function NewsArticlePage({ params }: { params: Promise<{ sl
         {item.caption && <figcaption><MarkdownInline source={item.caption} /></figcaption>}
       </figure>)}
       {article.attachment && <div className="news-original-file"><a href={`${article.attachment}?name=${encodeURIComponent(article.attachmentName || "新闻稿")}`}>下载原文件：{article.attachmentName || "新闻稿"} ↗</a></div>}
+      {article.externalUrl && <div className="news-original-file"><a href={article.externalUrl} target="_blank" rel="noopener noreferrer">查看论文或相关链接 ↗</a></div>}
     </div></article>
   </main>;
 }

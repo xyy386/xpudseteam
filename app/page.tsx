@@ -1,4 +1,4 @@
-import { getSiteContent } from "./content";
+import { getSiteContent, isPublishedArticle } from "./content";
 import { appearanceStyle } from "./appearance";
 import { MarkdownInline, MarkdownText } from "./markdown";
 import { heroBackgroundStyle } from "./hero-background";
@@ -7,7 +7,7 @@ import { ContactSection, ImageSlot, SiteFooter, SiteHeader } from "./site-shell"
 export default async function Home() {
   const content = await getSiteContent();
   const featuredNews = content.archives.find((item) => item.homeAnchor === "news" && item.slug === content.hero.featureTargetSlug);
-  const featuredArticle = featuredNews?.newsArticles.find((item) => item.id === content.hero.featureArticleId);
+  const featuredArticle = featuredNews?.newsArticles.find((item) => item.id === content.hero.featureArticleId && isPublishedArticle(item));
   const featuredHref = featuredArticle ? `/archive/${featuredNews?.slug}/${featuredArticle.id}` : featuredNews ? `/archive/${featuredNews.slug}` : "/news";
   return <main id="top" className="site-page" style={appearanceStyle(content.appearance, content.appearanceMobile)}>
     <SiteHeader content={content} />

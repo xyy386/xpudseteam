@@ -24,3 +24,9 @@ export const editorSessions = sqliteTable("editor_sessions", {
   expiresAt: integer("expires_at").notNull(),
   createdAt: integer("created_at").notNull(),
 });
+
+export const aiRequestLimits = sqliteTable("ai_request_limits", {
+  ownerId: text("owner_id").primaryKey(),
+  windowStart: integer("window_start").notNull(),
+  requestCount: integer("request_count").notNull(),
+});

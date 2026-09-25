@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { isSiteEditor } from "../../editor-auth";
+import { getEditorIdentity } from "../../editor-credentials";
 import { getSiteContent, type SiteContent } from "../../content";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +11,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  if (!(await isSiteEditor())) return Response.json({ error: "没有编辑权限" }, { status: 403 });
+  const identity = await getEditorIdentity();
+  if (!identity) return Response.json({ error: "没有编辑权限" }, { status: 403 });
   if (request.headers.get("origin") !== new URL(request.url).origin) {
     return Response.json({ error: "请求来源无效" }, { status: 403 });
   }
@@ -26,6 +28,21 @@ export async function POST(request: Request) {
     }
     const stored = await getSiteContent();
     if (content.revision !== stored.revision) return Response.json({ error: "网站内容已被其他成员更新，请核对合并结果。", current: stored }, { status: 409 });
+    const oldArticles = new Map(stored.archives.flatMap((archive) => archive.newsArticles.map((article) => [article.id, article] as const)));
+    for (const archive of content.archives) for (const article of archive.newsArticles ?? []) {
+      const previous = oldArticles.get(article.id);
+      const oldStatus = previous?.status === "draft" ? "draft" : previous ? "published" : "draft";
+      const nextStatus = article.status === "draft" ? "draft" : "published";
+      if (identity.role !== "owner" && nextStatus !== oldStatus) return Response.json({ error: "新闻稿发布和撤回须由管理员审核" }, { status: 403 });
+      if (article.externalUrl) {
+        try { if (new URL(article.externalUrl).protocol !== "https:") throw new Error(); }
+        catch { return Response.json({ error: "论文或相关链接必须是完整的 HTTPS 地址" }, { status: 400 }); }
+      }
+      if (nextStatus === "published" && (oldStatus === "draft" || !previous) && article.id !== "original-events-material"
+        && (!article.title?.trim() || !article.date || (!article.attachment && !article.externalUrl && !article.body?.trim()))) {
+        return Response.json({ error: "发布前请核对标题、日期以及正文、附件或相关链接" }, { status: 400 });
+      }
+    }
     if (!Array.isArray(content.customSections)) content.customSections = stored.customSections;
     if (typeof content.hero.featureTargetSlug !== "string") content.hero.featureTargetSlug = stored.hero.featureTargetSlug;
     if (typeof content.hero.featureArticleId !== "string") content.hero.featureArticleId = stored.hero.featureArticleId;

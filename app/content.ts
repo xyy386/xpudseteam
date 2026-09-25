@@ -9,7 +9,10 @@ export type GalleryItem = { label: string; image: string; caption: string; layou
 export type NewsArticle = {
   id: string; title: string; date: string; summary: string; body: string; thumbnail: string;
   images: Array<{ image: string; caption: string }>; attachment: string; attachmentName: string; source: string; importWarnings: string[];
+  status: "draft" | "published"; externalUrl: string;
 };
+
+export function isPublishedArticle(article: NewsArticle): boolean { return article.status !== "draft"; }
 export type PaperItem = { title: string; description: string; image: string; url: string; layout?: PhotoLayout; layoutMobile?: PhotoLayout };
 export type TopicItem = { title: string; detail: string; image: string };
 export type SubsectionItem = { id: string; title: string; body: string; image: string; url: string; items: PaperItem[] };
@@ -48,6 +51,7 @@ export type Appearance = {
 };
 export type SiteContent = {
   revision: string;
+  syncBaseRevision?: string;
   siteName: string; institution: string; contact: string;
   contactDetails: { person: string; role: string; email: string; phone: string; address: string; extra: string };
   hero: { eyebrow: string; title: string; subtitle: string; detail: string; background: string; backgroundVisibility: number;
@@ -153,6 +157,7 @@ function legacyNewsArticles(item: ArchiveItem): NewsArticle[] {
     thumbnail: article.thumbnail ?? "", images: Array.isArray(article.images) ? article.images : [],
     attachment: article.attachment ?? "", attachmentName: article.attachmentName ?? "", source: article.source ?? "",
     importWarnings: Array.isArray(article.importWarnings) ? article.importWarnings : [],
+    status: article.status === "draft" ? "draft" : "published", externalUrl: article.externalUrl ?? "",
   }));
   if (item.slug !== "events" || !item.summary?.trim()) return [];
   return [{
@@ -160,7 +165,7 @@ function legacyNewsArticles(item: ArchiveItem): NewsArticle[] {
     summary: item.summary, body: item.summary,
     thumbnail: item.cover || item.gallery?.find((image) => image.image)?.image || "",
     images: (item.gallery ?? []).filter((image) => image.image).map((image) => ({ image: image.image, caption: image.caption || image.label })),
-    attachment: "", attachmentName: "", source: "", importWarnings: [],
+    attachment: "", attachmentName: "", source: "", importWarnings: [], status: "published", externalUrl: "",
   }];
 }
 

@@ -46,6 +46,8 @@ try:
 
     status, _, html, _ = call("/edit", cookie=both)
     assert status == 200 and email.encode() in html, status
+    assert "同步到线上".encode() not in html and "同步详情与备份".encode() not in html
+    assert call("/api/site-snapshot", cookie=both)[0] == 403
     assert call("/api/site-content", cookie=both)[0] == 200
     assert call("/api/editor-members", cookie=both)[0] == 403
     assert call("/api/editor-members", "POST", {"email": "blocked@example.invalid", "days": 1}, both)[0] == 403
@@ -82,7 +84,8 @@ try:
     status, headers, _, _ = call("/api/editor-session", "DELETE", cookie=both)
     assert status == 200 and len([cookie for cookie in headers.get_all("Set-Cookie") if "Max-Age=0" in cookie]) == 2, status
     assert call("/api/editor-members", cookie=owner)[0] == 200
-    assert call("/edit", cookie=owner)[0] == 200
+    status, _, html, _ = call("/edit", cookie=owner)
+    assert status == 200 and "同步到线上".encode() in html
     print("owner/member identity priority PASS")
 finally:
     if member_id:

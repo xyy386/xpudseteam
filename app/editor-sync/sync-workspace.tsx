@@ -436,8 +436,11 @@ export default function SyncWorkspace({ environment, peerOrigin, localDataDir, h
     {synced && <a href={peerOrigin + "/"} target="_blank" rel="noopener noreferrer">查看目标网页 ↗</a>}
     {review && !review.canApply && <div role="alert" className="editor-quick-sync-conflict">
       <strong>同步已停止，目标内容未改动。</strong>
+      {review.changedPaths.length > 0 && <p>来源改动：{review.changedPaths.map(describePath).join("；")}</p>}
       {review.conflicts.length > 0 && <p>冲突位置：{review.conflicts.map(describePath).join("；")}</p>}
-      <a href="/editor-sync">查看同步详情与备份</a>
+      <a href="/edit" target="_blank" rel="noopener noreferrer">查看当前编辑</a>{" · "}
+      <a href={peerOrigin + "/edit"} target="_blank" rel="noopener noreferrer">查看目标编辑</a>{" · "}
+      <a href="/editor-sync">同步详情与备份</a>
     </div>}
   </div>;
 

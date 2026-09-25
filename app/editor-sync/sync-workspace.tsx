@@ -403,8 +403,8 @@ export default function SyncWorkspace({ environment, peerOrigin, localDataDir, h
       <h2>同步前审核 · 尚未覆盖目标</h2>
       <p>来源修订：<code>{review.sourceRevision || "初始内容"}</code></p>
       <p>目标修订：<code>{review.targetRevision || "初始内容"}</code></p>
-      <p>本地改变的路径：</p>
-      {review.changedPaths.length ? <ul>{review.changedPaths.map((path) => <li key={path}>{describePath(path)}</li>)}</ul> : <p>无本地内容变更。</p>}
+      <p>{environment === "online" ? "线上与本地的差异：" : "本地改变的路径："}</p>
+      {review.changedPaths.length ? <ul>{review.changedPaths.map((path) => <li key={path}>{describePath(path)}</li>)}</ul> : <p>{environment === "online" ? "内容无差异。" : "无本地内容变更。"}</p>}
       <p>目标将受影响的位置：</p>
       {review.affectedPaths.length ? <ul>{review.affectedPaths.map((path) => <li key={path}>{describePath(path)}</li>)}</ul> : <p>目标内容无需修改。</p>}
       {review.conflicts.length > 0 && <><p role="alert">{review.warning}</p>

@@ -292,8 +292,21 @@ export async function POST(request: Request) {
     const sourceSha256 = await sha256Hex(new TextEncoder().encode(snapshotText));
     if (action === "ack") {
       if (online() || snapshot.origin !== "online") throw new SyncError("仅本地可确认线上同步", 400);
+      const current = await getSiteContent();
+      const expectedRevision = request.headers.get("x-expected-revision") ?? "";
+      if (current.revision !== expectedRevision) throw new SyncError("本地内容在同步期间发生变化，请先核对", 409);
+      const { revision: _localRevision, syncBaseRevision: localBaseRevision, ...localFields } = current;
+      const { revision: onlineRevision, syncBaseRevision: _onlineBaseRevision, ...onlineFields } = snapshot.content;
+      if (localBaseRevision === onlineRevision && JSON.stringify(localFields) === JSON.stringify(onlineFields)) {
+        const missing = await planAssets(snapshot.assets.map((asset) => asset.path), snapshot, decoded, bucket);
+        if (!missing.length) {
+          await writeBase(snapshot.content, bucket);
+          return Response.json({ ok: true, revision: current.revision, backupId: "",
+            importedAssets: 0, changedSections: [] }, { headers: { "Cache-Control": "no-store" } });
+        }
+      }
       const result = await applyFullSnapshot(snapshot, decoded,
-        request.headers.get("x-expected-revision") ?? "", db, bucket);
+        expectedRevision, db, bucket);
       return Response.json({ ok: true, ...result }, { headers: { "Cache-Control": "no-store" } });
     }
     const current = await getSiteContent();

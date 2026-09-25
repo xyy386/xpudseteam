@@ -10,6 +10,7 @@ export type SiteSnapshot = {
   exportedAt: string;
   origin: "local" | "online";
   content: SiteContent;
+  baseContent?: SiteContent;
   assets: SnapshotAsset[];
 };
 
@@ -66,6 +67,11 @@ export async function parseSnapshot(text: string): Promise<{ snapshot: SiteSnaps
     || !snapshot.content || typeof snapshot.content !== "object" || !Array.isArray(snapshot.content.archives)
     || !Array.isArray(snapshot.content.members) || !Array.isArray(snapshot.content.directions)
     || typeof snapshot.content.revision !== "string" || !Array.isArray(snapshot.assets)) throw new Error("快照格式不正确");
+  if (snapshot.baseContent && (snapshot.origin !== "local" || !Array.isArray(snapshot.baseContent.archives)
+    || !Array.isArray(snapshot.baseContent.members) || !Array.isArray(snapshot.baseContent.directions)
+    || !snapshot.baseContent.revision || snapshot.baseContent.revision !== snapshot.content.syncBaseRevision)) {
+    throw new Error("同步基线与本地内容不一致");
+  }
   if (JSON.stringify(snapshot.content).length > 750_000) throw new Error("内容数据超过站点存储限制");
   const references = referencedAssets(snapshot.content);
   if (snapshot.assets.length !== references.length) throw new Error("快照附件清单与内容引用不一致");

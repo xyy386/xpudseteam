@@ -44,6 +44,8 @@ export async function POST(request: Request) {
       }
     }
     if (!Array.isArray(content.customSections)) content.customSections = stored.customSections;
+    // The synchronization baseline is managed only by owner-only snapshot operations.
+    content.syncBaseRevision = stored.syncBaseRevision;
     if (typeof content.hero.featureTargetSlug !== "string") content.hero.featureTargetSlug = stored.hero.featureTargetSlug;
     if (typeof content.hero.featureArticleId !== "string") content.hero.featureArticleId = stored.hero.featureArticleId;
     content.directions = content.directions.map((item) => ({ ...item, subsections: Array.isArray(item.subsections) ? item.subsections : stored.directions.find((saved) => saved.slug === item.slug)?.subsections ?? [] }));

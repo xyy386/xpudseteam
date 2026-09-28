@@ -5,6 +5,11 @@ import { ArchiveDetailContent } from "../../archive-detail-content";
 import { SiteFooter, SiteHeader } from "../../site-shell";
 import { NewsListPage } from "../../news-articles";
 
+export async function generateStaticParams() {
+  const content = await getSiteContent();
+  return content.archives.map((section) => ({ slug: section.slug }));
+}
+
 export default async function ArchivePage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const content = await getSiteContent();

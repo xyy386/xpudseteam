@@ -4,6 +4,11 @@ import { appearanceStyle } from "../../appearance";
 import { ResearchDetailContent } from "../../research-detail-content";
 import { SiteFooter, SiteHeader } from "../../site-shell";
 
+export async function generateStaticParams() {
+  const content = await getSiteContent();
+  return content.directions.map((direction) => ({ slug: direction.slug }));
+}
+
 export default async function ResearchDetail({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const content = await getSiteContent();

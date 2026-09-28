@@ -1,4 +1,3 @@
-import { env } from "cloudflare:workers";
 import { members, directions } from "./site-data";
 import { archiveSections } from "./archive-data";
 import { defaultAppearance, defaultMobileAppearance } from "./appearance-defaults";
@@ -188,16 +187,10 @@ function mergeContent(base: SiteContent, saved: Partial<SiteContent>): SiteConte
     };
 }
 
-const initialContent = mergeContent(defaultContent, savedContent as unknown as Partial<SiteContent>);
+// 静态站点的唯一内容来源：打包在源码里的 saved-content.json 与默认数据合并。
+// 需要更新网站内容时，替换 app/saved-content.json 后重新构建。
+export const initialContent: SiteContent = mergeContent(defaultContent, savedContent as unknown as Partial<SiteContent>);
 
 export async function getSiteContent(): Promise<SiteContent> {
-  if (!env.DB) return initialContent;
-  try {
-    const row = await env.DB.prepare("SELECT data, updated_at FROM site_content WHERE id = 1").first<{ data: string; updated_at: string }>();
-    if (!row) return initialContent;
-    return { ...mergeContent(initialContent, JSON.parse(row.data) as Partial<SiteContent>), revision: row.updated_at };
-  } catch (error) {
-    console.error("Site content unavailable", error);
-    return initialContent;
-  }
+  return initialContent;
 }

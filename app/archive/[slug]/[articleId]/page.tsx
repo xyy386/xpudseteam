@@ -4,6 +4,13 @@ import { appearanceStyle } from "../../../appearance";
 import { NewsArticleContent } from "../../../news-articles";
 import { SiteFooter, SiteHeader } from "../../../site-shell";
 
+export async function generateStaticParams() {
+  const content = await getSiteContent();
+  return content.archives
+    .filter((section) => section.slug === "events" || section.slug === "updates")
+    .flatMap((section) => section.newsArticles.filter(isPublishedArticle).map((article) => ({ slug: section.slug, articleId: article.id })));
+}
+
 export default async function NewsArticlePage({ params }: { params: Promise<{ slug: string; articleId: string }> }) {
   const { slug, articleId } = await params;
   if (slug !== "events" && slug !== "updates") notFound();

@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 export default async function EditPage() {
   const identity = await getEditorIdentity();
-  if (!identity) redirect("/editor-login");
+  if (!identity) redirect("/login");
   const content = await getSiteContent();
   return <Editor key={`${identity.role}:${identity.id}`} initial={content} role={identity.role}
     email={identity.email} accountId={identity.id} environment={syncEnvironment()}

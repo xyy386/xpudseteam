@@ -12,7 +12,7 @@ export type NewsArticle = {
   status: "draft" | "published"; externalUrl: string;
 };
 
-export function isPublishedArticle(article: NewsArticle): boolean { return article.status !== "draft"; }
+export { isPublishedArticle } from "./home-news";
 export type PaperItem = { title: string; description: string; image: string; url: string; layout?: PhotoLayout; layoutMobile?: PhotoLayout };
 export type TopicItem = { title: string; detail: string; image: string };
 export type SubsectionItem = { id: string; title: string; body: string; image: string; url: string; items: PaperItem[] };
@@ -85,7 +85,7 @@ const cardSummaries: Record<string, string> = {
 export const defaultContent: SiteContent = {
   revision: "",
   siteName: "数据驱动的科学工程建模与计算团队",
-  institution: "西安工程大学 · 科研团队",
+  institution: "西安工程大学 理学院",
   contact: "西安工程大学",
   contactDetails: { person: "", role: "", email: "", phone: "", address: "", extra: "" },
   hero: {

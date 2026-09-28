@@ -20,8 +20,8 @@ export default function LoginForm() {
     finally { setBusy(false); }
   }
   return <form onSubmit={login} className="editor-auth-form">
-    <label>成员邮箱<input type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} /></label>
-    <label>网站密码<input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+    <label>账号邮箱<input type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} /></label>
+    <label>网站密码<input type="password" autoComplete="current-password" maxLength={128} required value={password} onChange={(event) => setPassword(event.target.value)} /></label>
     <button type="submit" disabled={busy}>{busy ? "登录中…" : "登录并编辑"}</button>
     {message && <p role="alert">{message}</p>}
   </form>;

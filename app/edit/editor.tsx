@@ -9,7 +9,9 @@ import { PhotoComposer } from "./photo-composer";
 import { importNewsFile } from "./news-import";
 import { conflictPreview, mergeSiteContent, type ConflictChoices, type MergeConflict } from "./three-way-merge";
 import SyncWorkspace from "../editor-sync/sync-workspace";
+import LogoutButton from "../login/logout-button";
 import type { SyncEnvironment } from "../sync-environment";
+import { findPublicationValidationError } from "../publication-links";
 
 type Path = Array<string | number>;
 
@@ -74,7 +76,10 @@ function Editor({ initial, role, email, accountId, environment, peerOrigin }: {
   const [mobileMode, setMobileMode] = useState(false);
   const [previewView, setPreviewView] = useState("home");
   const [activeItemIndex, setActiveItemIndex] = useState<number | null>(null);
+  const [activeArchiveSlug, setActiveArchiveSlug] = useState<string | null>(null);
+  const activeArchiveSlugRef = useRef<string | null>(null);
   const [previewFocusPath, setPreviewFocusPath] = useState("");
+  const [educationPreview, setEducationPreview] = useState<{ id: string; mode: "overview" | "detail" } | null>(null);
   const [importingArticleId, setImportingArticleId] = useState("");
   const [reviewedArticleIds, setReviewedArticleIds] = useState<string[]>([]);
   const [pendingMerge, setPendingMerge] = useState<{ base: SiteContent; mine: SiteContent; theirs: SiteContent; conflicts: MergeConflict[] } | null>(null);
@@ -99,6 +104,45 @@ function Editor({ initial, role, email, accountId, environment, peerOrigin }: {
     return () => window.removeEventListener("beforeunload", warnBeforeLeaving);
   }, [dirty]);
 
+  function reconcileEducationPreview(next: SiteContent) {
+    const sections = next.customSections.find((section) => section.id === "education")?.subsections ?? [];
+    setEducationPreview((current) => current && !sections.some((section) => section.id === current.id) ? null : current);
+  }
+
+  function selectArchivePreview(slug: string | null) {
+    activeArchiveSlugRef.current = slug;
+    setActiveArchiveSlug(slug);
+  }
+
+  function reconcileArchivePreview(next: SiteContent) {
+    const slug = activeArchiveSlugRef.current;
+    if (!slug) return;
+    const index = next.archives.findIndex((section) => section.slug === slug);
+    if (index < 0) {
+      selectArchivePreview(null);
+      setPreviewFocusPath("");
+      return;
+    }
+    setPreviewView(next.archives[index].homeAnchor);
+    setPreviewFocusPath((path) => path.replace(/^archives\.\d+(?=\.|$)/, `archives.${index}`));
+  }
+
+  function openEducationDetail(id: string) {
+    const customIndex = contentRef.current.customSections.findIndex((section) => section.id === "education");
+    const subsectionIndex = contentRef.current.customSections[customIndex]?.subsections.findIndex((section) => section.id === id) ?? -1;
+    if (subsectionIndex < 0) return;
+    setPreviewView("custom-education");
+    setActiveItemIndex(null);
+    selectArchivePreview(null);
+    setEducationPreview({ id, mode: "detail" });
+    setPreviewFocusPath(`customSections.${customIndex}.subsections.${subsectionIndex}`);
+  }
+
+  function returnToEducationOverview() {
+    setEducationPreview((current) => current ? { ...current, mode: "overview" } : null);
+    setPreviewFocusPath("");
+  }
+
   function commit(change: (draft: SiteContent) => void, groupKey = "") {
     const previous = contentRef.current;
     const next = structuredClone(previous);
@@ -113,6 +157,8 @@ function Editor({ initial, role, email, accountId, environment, peerOrigin }: {
     redoRef.current = [];
     contentRef.current = next;
     setContent(next);
+    reconcileEducationPreview(next);
+    reconcileArchivePreview(next);
     setHistory({ undo: undoRef.current.length > 0, redo: false });
     const hasChanges = JSON.stringify(next) !== savedRef.current;
     setDirty(hasChanges);
@@ -122,17 +168,27 @@ function Editor({ initial, role, email, accountId, environment, peerOrigin }: {
   function selectPreview(path: Path, value?: unknown) {
     const [root, key, field] = path;
     if (root === "appearance" || root === "appearanceMobile" || root === "pageText") return;
-    setPreviewFocusPath(path.join("."));
+    if (root !== "archives" || typeof key === "number") setPreviewFocusPath(path.join("."));
+    if (root !== "customSections") setEducationPreview(null);
+    if (root !== "archives") selectArchivePreview(null);
     if (root === "members") { setPreviewView("team"); setActiveItemIndex(typeof key === "number" ? key : null); return; }
     if (root === "directions") { setPreviewView("research"); setActiveItemIndex(typeof key === "number" ? key : null); return; }
     if (root === "archives") {
       const section = typeof key === "number" ? contentRef.current.archives[key] : null;
+      if (typeof key !== "number") return;
       const destination = field === "homeAnchor" && typeof value === "string" ? value : section?.homeAnchor ?? "other";
-      setPreviewView(destination); setActiveItemIndex(typeof key === "number" ? key : null); return;
+      selectArchivePreview(section?.slug ?? null);
+      setPreviewView(destination); setActiveItemIndex(null); return;
     }
     if (root === "customSections") {
       const section = typeof key === "number" ? contentRef.current.customSections[key] : null;
       if (section) setPreviewView(`custom-${section.id}`);
+      if (section?.id === "education" && field === "subsections") {
+        const child = typeof path[3] === "number" ? section.subsections[path[3]] : null;
+        if (child) setEducationPreview({ id: child.id, mode: "detail" });
+      } else if (section || typeof key === "number") {
+        setEducationPreview(null);
+      }
       setActiveItemIndex(null); return;
     }
     if (root === "contact" || root === "contactDetails") { setPreviewView("contact"); setActiveItemIndex(null); return; }
@@ -157,6 +213,7 @@ function Editor({ initial, role, email, accountId, environment, peerOrigin }: {
       for (const key of path) target = target[key] as Record<string | number, unknown>;
       (target as unknown as unknown[]).push(item);
     });
+    if (path.length === 1 && path[0] === "archives") selectPreview(["archives", contentRef.current.archives.length - 1]);
   }
 
   function remove(path: Path, index: number) {
@@ -198,6 +255,8 @@ function Editor({ initial, role, email, accountId, environment, peerOrigin }: {
     const index = contentRef.current.customSections.length;
     add(["customSections"], { id, title: "新栏目", english: "NEW SECTION", intro: "", body: "", image: "", items: [], subsections: [] } satisfies CustomSection);
     setPreviewView(`custom-${id}`);
+    setEducationPreview(null);
+    selectArchivePreview(null);
     setActiveItemIndex(null);
     setPreviewFocusPath("");
     if (scrollToEditor) requestAnimationFrame(() => jump("custom", index));
@@ -213,9 +272,14 @@ function Editor({ initial, role, email, accountId, environment, peerOrigin }: {
     const directionIndex = current.directions.findIndex((item) => item.subsections.some((child) => child.id === id));
     const archiveIndex = current.archives.findIndex((item) => item.subsections.some((child) => child.id === id));
     const customIndex = current.customSections.findIndex((item) => item.subsections.some((child) => child.id === id));
+    setEducationPreview(null);
+    selectArchivePreview(directionIndex < 0 && archiveIndex >= 0 ? current.archives[archiveIndex].slug : null);
     if (directionIndex >= 0) { setPreviewView("research"); setActiveItemIndex(directionIndex); setPreviewFocusPath(`directions.${directionIndex}.subsections.${current.directions[directionIndex].subsections.findIndex((child) => child.id === id)}`); }
-    else if (archiveIndex >= 0) { setPreviewView(current.archives[archiveIndex].homeAnchor); setActiveItemIndex(archiveIndex); setPreviewFocusPath(`archives.${archiveIndex}.subsections.${current.archives[archiveIndex].subsections.findIndex((child) => child.id === id)}`); }
-    else if (customIndex >= 0) { setPreviewView(`custom-${current.customSections[customIndex].id}`); setActiveItemIndex(null); setPreviewFocusPath(`customSections.${customIndex}.subsections.${current.customSections[customIndex].subsections.findIndex((child) => child.id === id)}`); }
+    else if (archiveIndex >= 0) { setPreviewView(current.archives[archiveIndex].homeAnchor); setActiveItemIndex(null); setPreviewFocusPath(`archives.${archiveIndex}.subsections.${current.archives[archiveIndex].subsections.findIndex((child) => child.id === id)}`); }
+    else if (customIndex >= 0) {
+      setPreviewView(`custom-${current.customSections[customIndex].id}`); setActiveItemIndex(null); setPreviewFocusPath(`customSections.${customIndex}.subsections.${current.customSections[customIndex].subsections.findIndex((child) => child.id === id)}`);
+      if (current.customSections[customIndex].id === "education") setEducationPreview({ id, mode: "detail" });
+    }
     const target = document.getElementById(`editor-subsection-${id}`);
     const parent = target?.closest("details");
     if (parent) parent.open = true;
@@ -230,6 +294,8 @@ function Editor({ initial, role, email, accountId, environment, peerOrigin }: {
     target.push(contentRef.current);
     contentRef.current = next;
     setContent(next);
+    reconcileEducationPreview(next);
+    reconcileArchivePreview(next);
     lastEditRef.current = { key: "", at: 0 };
     setHistory({ undo: undoRef.current.length > 0, redo: redoRef.current.length > 0 });
     const hasChanges = JSON.stringify(next) !== savedRef.current;
@@ -237,20 +303,25 @@ function Editor({ initial, role, email, accountId, environment, peerOrigin }: {
     setStatus(hasChanges ? "有未保存的修改" : "已恢复到上次保存的内容");
   }
 
-  function jump(section: string, index?: number) {
-    setPreviewFocusPath("");
+  function jump(section: string, index?: number, articleIndex?: number) {
+    if (section !== "appearance" && section !== "pages") setEducationPreview(null);
+    if (section !== "appearance" && section !== "pages") selectArchivePreview((section === "archives" || section === "news-posts") && index !== undefined ? contentRef.current.archives[index]?.slug ?? null : null);
+    const newsArchive = section === "news-posts" && index !== undefined ? contentRef.current.archives[index] : undefined;
+    const newsArticle = articleIndex !== undefined ? newsArchive?.newsArticles[articleIndex] : undefined;
+    setPreviewFocusPath(newsArticle ? `archives.${index}.newsArticles.${articleIndex}` : "");
     if (section === "home") { setPreviewView("home"); setActiveItemIndex(null); }
     if (section === "members") { setPreviewView("team"); setActiveItemIndex(index ?? null); }
     if (section === "directions") { setPreviewView("research"); setActiveItemIndex(index ?? null); }
-    if (section === "archives") { setPreviewView(index === undefined ? "outcomes" : contentRef.current.archives[index]?.homeAnchor ?? "outcomes"); setActiveItemIndex(index ?? null); }
-    if (section === "news-posts") { setPreviewView("news"); setActiveItemIndex(index ?? null); }
+    if (section === "archives") { setPreviewView(index === undefined ? "outcomes" : contentRef.current.archives[index]?.homeAnchor ?? "outcomes"); setActiveItemIndex(null); }
+    if (section === "news-posts") { setPreviewView(newsArchive?.homeAnchor ?? "news"); setActiveItemIndex(null); }
     if (section === "custom" && index !== undefined) { setPreviewView(`custom-${contentRef.current.customSections[index]?.id}`); setActiveItemIndex(null); }
     if (section === "contact") { setPreviewView("contact"); setActiveItemIndex(null); }
     const element = document.getElementById(`editor-${section}`) as HTMLDetailsElement | null;
     if (!element) return;
     element.open = true;
     requestAnimationFrame(() => {
-      const target = index === undefined ? element : document.getElementById(`editor-${section}-${index}`) ?? element;
+      const articleTarget = newsArchive && newsArticle ? document.getElementById(`editor-news-${newsArchive.slug}-${newsArticle.id}`) : null;
+      const target = articleTarget ?? (index === undefined ? element : document.getElementById(`editor-${section}-${index}`) ?? element);
       target.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   }
@@ -288,6 +359,14 @@ function Editor({ initial, role, email, accountId, environment, peerOrigin }: {
 
   async function save() {
     if (pendingMerge) return;
+    const publicationError = findPublicationValidationError(contentRef.current.archives);
+    if (publicationError) {
+      setStatus(publicationError.message);
+      jump("archives", publicationError.archiveIndex);
+      const rowIndex = publicationError.rowIndex;
+      if (rowIndex !== null) requestAnimationFrame(() => document.getElementById(`editor-archive-${publicationError.archiveIndex}-row-${rowIndex - 1}`)?.scrollIntoView({ behavior: "smooth", block: "center" }));
+      return;
+    }
     const incomplete = contentRef.current.archives.flatMap((archive, archiveIndex) => (archive.slug === "events" || archive.slug === "updates")
       ? archive.newsArticles.map((article, articleIndex) => ({ article, archiveIndex, articleIndex })).filter(({ article }) => article.status !== "draft" && article.id !== "original-events-material" && (!article.title.trim() || !article.date || (!article.attachment && !article.externalUrl && !article.body.trim()))) : [])[0];
     if (incomplete) {
@@ -351,6 +430,8 @@ function Editor({ initial, role, email, accountId, environment, peerOrigin }: {
       undoRef.current = [];
       redoRef.current = [];
       setContent(latest);
+      reconcileEducationPreview(latest);
+      reconcileArchivePreview(latest);
       setHistory({ undo: false, redo: false });
       setDirty(false);
       setStatus("同步完成。编辑页已更新为最新内容。");
@@ -365,6 +446,8 @@ function Editor({ initial, role, email, accountId, environment, peerOrigin }: {
     contentRef.current = merged;
     savedRef.current = JSON.stringify(theirs);
     setContent(merged);
+    reconcileEducationPreview(merged);
+    reconcileArchivePreview(merged);
     setDirty(JSON.stringify(merged) !== savedRef.current);
     setHistory({ undo: true, redo: false });
     setPendingMerge(null);
@@ -428,38 +511,51 @@ function Editor({ initial, role, email, accountId, environment, peerOrigin }: {
     <label className="editor-range"><span>{label}显示强度：{Math.round(content.backgroundVisibility[key] * 100)}%</span><input type="range" min="0.05" max="0.45" step="0.01" value={content.backgroundVisibility[key]} onChange={(event) => write(["backgroundVisibility", key], Number(event.target.value))} /></label>;
   const appearanceKey = mobileMode ? "appearanceMobile" : "appearance";
   const selectedAppearance = content[appearanceKey];
-  const newsOptions = content.archives.filter((item) => item.homeAnchor === "news");
-  const featuredNews = newsOptions.find((item) => item.slug === content.hero.featureTargetSlug);
-  const featuredArticle = featuredNews?.newsArticles.find((item) => item.id === content.hero.featureArticleId && item.status !== "draft");
+  const educationIndex = content.customSections.findIndex((section) => section.id === "education");
   const sizeField = (label: string, key: keyof Appearance, min: number, max: number, step = 1, unit = "px") =>
     <SizeControl label={label} value={selectedAppearance[key] as number} min={min} max={max} step={step} unit={unit} onChange={(value) => write([appearanceKey, key], value)} />;
-  const subsectionEditor = (path: Path, subsections: SubsectionItem[]) => <>
+  const subsectionEditor = (path: Path, subsections: SubsectionItem[], plainImages = false) => <>
     {subsections.map((section, index) => <div className="editor-subsection" id={`editor-subsection-${section.id}`} key={section.id}>
       <div className="editor-item-head"><h4>{section.title || `子栏目 ${index + 1}`}</h4><div><button type="button" onClick={() => move(path, index, -1)}>上移</button><button type="button" onClick={() => move(path, index, 1)}>下移</button><button type="button" onClick={() => remove(path, index)}>删除</button></div></div>
       {editField("子栏目标题", [...path, index, "title"], section.title, true, true)}
       {editField("内容介绍", [...path, index, "body"], section.body, true)}
       {editField("详情链接", [...path, index, "url"], section.url)}
       {imageField("子栏目主图", [...path, index, "image"], section.image)}
-      <PhotoComposer title="子栏目图片组合" mobile={mobileMode} items={section.items.map((item) => ({ label: item.title, image: item.image, layout: mobileMode ? item.layoutMobile : item.layout }))} onLayout={(itemIndex, layout) => write([...path, index, "items", itemIndex, mobileMode ? "layoutMobile" : "layout"], layout)} onPreset={(layouts) => arrange([...path, index, "items"], layouts, mobileMode ? "layoutMobile" : "layout")} onAdd={() => add([...path, index, "items"], { title: "新图片", description: "", image: "", url: "" })} onUpload={(itemIndex, file) => void upload(file, [...path, index, "items", itemIndex, "image"])} onEdit={(itemIndex) => jumpToImage(`editor-subsection-${section.id}-image-${itemIndex}`)} onReorder={(itemIndex, step) => move([...path, index, "items"], itemIndex, step)} onDelete={(itemIndex) => remove([...path, index, "items"], itemIndex)} />
-      {section.items.map((item, itemIndex) => <div className="editor-subitem" id={`editor-subsection-${section.id}-image-${itemIndex}`} key={itemIndex}>{editField("图片标题", [...path, index, "items", itemIndex, "title"], item.title)}{editField("图片说明", [...path, index, "items", itemIndex, "description"], item.description, true)}{editField("图片链接", [...path, index, "items", itemIndex, "url"], item.url)}{imageField("照片", [...path, index, "items", itemIndex, "image"], item.image)}<button type="button" onClick={() => remove([...path, index, "items"], itemIndex)}>删除图片</button></div>)}
+      {plainImages
+        ? <button type="button" className="editor-add" onClick={() => add([...path, index, "items"], { title: "新图片", description: "", image: "", url: "" })}>＋ 添加图片</button>
+        : <PhotoComposer title="子栏目图片组合" mobile={mobileMode} items={section.items.map((item) => ({ label: item.title, image: item.image, layout: mobileMode ? item.layoutMobile : item.layout }))} onLayout={(itemIndex, layout) => write([...path, index, "items", itemIndex, mobileMode ? "layoutMobile" : "layout"], layout)} onPreset={(layouts) => arrange([...path, index, "items"], layouts, mobileMode ? "layoutMobile" : "layout")} onAdd={() => add([...path, index, "items"], { title: "新图片", description: "", image: "", url: "" })} onUpload={(itemIndex, file) => void upload(file, [...path, index, "items", itemIndex, "image"])} onEdit={(itemIndex) => jumpToImage(`editor-subsection-${section.id}-image-${itemIndex}`)} onReorder={(itemIndex, step) => move([...path, index, "items"], itemIndex, step)} onDelete={(itemIndex) => remove([...path, index, "items"], itemIndex)} />}
+      {section.items.map((item, itemIndex) => <div className="editor-subitem" id={`editor-subsection-${section.id}-image-${itemIndex}`} key={itemIndex}>
+        {editField("图片标题", [...path, index, "items", itemIndex, "title"], item.title)}
+        {editField("图片说明", [...path, index, "items", itemIndex, "description"], item.description, true)}
+        {editField("图片链接", [...path, index, "items", itemIndex, "url"], item.url)}
+        {imageField("照片", [...path, index, "items", itemIndex, "image"], item.image)}
+        {plainImages && <div className="editor-image-actions"><button type="button" disabled={itemIndex === 0} onClick={() => move([...path, index, "items"], itemIndex, -1)}>上移图片</button><button type="button" disabled={itemIndex === section.items.length - 1} onClick={() => move([...path, index, "items"], itemIndex, 1)}>下移图片</button></div>}
+        <button type="button" onClick={() => remove([...path, index, "items"], itemIndex)}>删除图片</button>
+      </div>)}
     </div>)}
     <button type="button" className="editor-add editor-add-subsection" onClick={() => {
       const id = crypto.randomUUID();
       add(path, { id, title: "新子栏目", body: "", image: "", url: "", items: [] } satisfies SubsectionItem);
       setPreviewFocusPath([...path, subsections.length].join("."));
+      if (plainImages && path[0] === "customSections") openEducationDetail(id);
       requestAnimationFrame(() => document.getElementById(`editor-subsection-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" }));
     }}>＋ 添加子栏目</button>
   </>;
 
+  const archivePreviewIndex = content.archives.findIndex((section) => section.slug === activeArchiveSlug && section.homeAnchor === previewView);
+  const previewItemIndex = previewView === "outcomes" || previewView === "news" || previewView === "other"
+    ? archivePreviewIndex < 0 ? null : archivePreviewIndex
+    : activeItemIndex;
+
   return <main className="editor-page">
-    <div className="editor-top"><div><p className="editor-eyebrow">SITE EDITOR / {environment === "local" ? "本地编辑" : "在线编辑"}</p><h1>编辑科研团队网站</h1><p>边改边看效果；确认后点击“保存全部修改”。{role === "owner" && <>保存后可在下方一键{environment === "local" ? "同步到线上" : "同步到本地"}。</>}</p></div><div className="editor-account-links"><span>{email}</span><a href="/" target="_blank" rel="noopener noreferrer">打开网站 ↗</a>{role === "owner" ? <><a href="/editor-ai">管理员起草助手</a><a href="/editor-sync">同步详情与备份</a><a href="/editor-members">管理临时成员</a></> : <><a href="/editor-account">修改密码</a><button type="button" onClick={async () => { await fetch("/api/editor-session", { method: "DELETE" }); window.location.assign("/editor-login"); }}>退出登录</button></>}</div></div>
+    <div className="editor-top"><div><p className="editor-eyebrow">SITE EDITOR / {environment === "local" ? "本地编辑" : "在线编辑"}</p><h1>编辑科研团队网站</h1><p>边改边看效果；确认后点击“保存全部修改”。{role === "owner" && <>保存后可在下方一键{environment === "local" ? "同步到线上" : "同步到本地"}。</>}</p></div><div className="editor-account-links"><span>{email}</span><a href="/" target="_blank" rel="noopener noreferrer">打开网站 ↗</a>{role === "owner" ? <><a href="/editor-ai">管理员起草助手</a><a href="/editor-sync">同步详情与备份</a><a href="/editor-members">管理临时成员</a></> : null}<a href="/editor-account">账号设置</a><LogoutButton /></div></div>
     <div className="editor-sticky"><span role="status" className={dirty ? "is-dirty" : ""}>{status || (environment === "local" ? "修改将保存在本地预览" : "修改将保存在在线网站")}</span><div className="editor-sticky-actions"><button type="button" className="editor-history" onClick={() => restore("undo")} disabled={!history.undo} title="撤销上一步修改">撤销</button><button type="button" className="editor-history" onClick={() => restore("redo")} disabled={!history.redo} title="恢复已撤销的修改">重做</button><button type="button" onClick={() => void save()} disabled={busy || !dirty}>{busy ? "保存中…" : dirty ? "保存全部修改" : "已保存"}</button>{role === "owner" && <SyncWorkspace compact environment={environment} peerOrigin={peerOrigin} localDataDir=""
       hasOnlineBase={environment === "online" || Boolean(initial.syncBaseRevision)}
       canStart={!busy && !dirty && !pendingMerge} onSynchronized={() => void refreshAfterSync()} />}</div></div>
     {recovery && <div className="editor-recovery" role="status">发现上次保存冲突时暂存的草稿。<button type="button" onClick={restoreConflictDraft}>恢复并核对</button><button type="button" onClick={() => { sessionStorage.removeItem(draftKey); setRecovery(null); }}>放弃草稿</button></div>}
-    <nav className="editor-jump" aria-label="快速定位编辑栏目">{[["home", "首页"], ["appearance", "字体与图片"], ["members", "团队成员"], ["directions", "研究方向"], ["outcomes", "研究成果"], ["news", "团队动态"], ["news-posts", "新闻稿"], ["other", "其他"], ["custom", "自定义栏目"], ["contact", "联系我们"], ["sections", "栏目与底图"], ["pages", "详情页文字"]].map(([key, label]) => <button type="button" key={key} onClick={() => { if (key === "outcomes" || key === "news" || key === "other") { jump("archives"); setPreviewView(key); } else if (key === "custom" && content.customSections.length) { jump("custom", 0); } else { jump(key); } }}>{label}</button>)}</nav>
+    <nav className="editor-jump" aria-label="快速定位编辑栏目">{[["home", "首页"], ["appearance", "字体与图片"], ["members", "团队成员"], ["directions", "研究方向"], ["outcomes", "研究成果"], ["education", "人才培养"], ["news", "团队动态"], ["news-posts", "新闻稿"], ["other", "其他"], ["custom", "自定义栏目"], ["contact", "联系我们"], ["sections", "栏目与底图"], ["pages", "详情页文字"]].filter(([key]) => key !== "education" || educationIndex >= 0).map(([key, label]) => <button type="button" key={key} onClick={() => { if (key === "outcomes" || key === "news" || key === "other") { jump("archives"); setPreviewView(key); } else if (key === "education") { jump("custom", educationIndex); } else if (key === "custom" && content.customSections.length) { jump("custom", 0); } else { jump(key); } }}>{label}</button>)}</nav>
     <div className="editor-workspace">
-    <LivePreview content={content} view={previewView} activeItemIndex={activeItemIndex} focusPath={previewFocusPath} onViewChange={(view) => { setPreviewView(view); setActiveItemIndex(null); setPreviewFocusPath(""); }} onEdit={jump} onEditSubsection={jumpToSubsection} onAddCustomSection={() => addCustomSection()} mobile={mobileMode} onModeChange={setMobileMode} />
+    <LivePreview content={content} view={previewView} activeItemIndex={previewItemIndex} focusPath={previewFocusPath} educationDetailId={educationPreview?.mode === "detail" ? educationPreview.id : null} educationActiveId={educationPreview?.id ?? null} onOpenEducation={openEducationDetail} onBackEducation={returnToEducationOverview} onViewChange={(view) => { setPreviewView(view); setActiveItemIndex(null); selectArchivePreview(null); setPreviewFocusPath(""); setEducationPreview(null); }} onEdit={jump} onEditSubsection={jumpToSubsection} onAddCustomSection={() => addCustomSection()} mobile={mobileMode} onModeChange={setMobileMode} />
     <div className="editor-panels">
       <details id="editor-appearance" open><summary>字体、排版与图片尺寸</summary><div className="editor-panel-body">
         <div className="editor-device-settings"><div><strong>正在调整：{mobileMode ? "手机端" : "电脑端"}</strong><span>两套尺寸分开保存，切换上方预览也会同步切换这里。</span></div><div><button type="button" className={!mobileMode ? "active" : ""} onClick={() => setMobileMode(false)}>电脑端</button><button type="button" className={mobileMode ? "active" : ""} onClick={() => setMobileMode(true)}>手机端</button><button type="button" className="editor-reset" onClick={() => write([appearanceKey], structuredClone(mobileMode ? defaultMobileAppearance : defaultAppearance))}>恢复默认</button></div></div>
@@ -467,7 +563,6 @@ function Editor({ initial, role, email, accountId, environment, peerOrigin }: {
         <label className="editor-field"><span>标题字体</span><select value={selectedAppearance.headingFont} onChange={(event) => write([appearanceKey, "headingFont"], event.target.value)}><option value="serif">宋体</option><option value="sans">现代黑体</option><option value="kai">楷体</option></select></label>
         {sizeField("正文大小", "bodySize", 13, 22)}
         {sizeField("段落行距", "lineHeight", 1.35, 2.2, .05, "倍")}
-        {sizeField("首页主标题大小", "heroTitleSize", mobileMode ? 30 : 42, mobileMode ? 60 : 88)}
         {sizeField("栏目标题大小", "sectionTitleSize", mobileMode ? 22 : 26, mobileMode ? 40 : 48)}
         {sizeField("成员介绍字号", "memberTextSize", 12, 21)}
         {sizeField("研究方向文字字号", "directionTextSize", 13, 22)}
@@ -478,46 +573,19 @@ function Editor({ initial, role, email, accountId, environment, peerOrigin }: {
         {sizeField("研究方向封面高度", "directionImageHeight", 160, 420)}
         {sizeField("成果封面高度", "outcomeImageHeight", 160, 420)}
         {sizeField("动态封面高度", "newsImageHeight", 160, 420)}
-        {sizeField("首页右侧新闻图片高度", "heroNewsImageHeight", 160, 420)}
         {sizeField("研究方向详情主图高度", "detailImageHeight", 200, 520)}
         {sizeField("研究主题图片高度", "topicImageHeight", 120, 360)}
-        <p className="editor-help">论文和成果详情中的多张照片，请在各自的图片组合区拖动、缩放并分别调整电脑和手机排版。文字框支持 Markdown 与数学公式；行内公式写作 $x^2$，独立公式写作 $$…$$。</p>
+        <p className="editor-help">研究方向和成果详情中的图片按列表顺序展示，可用上移、下移调整顺序；其他自定义栏目的图片仍可在图片组合区调整排版。文字框支持 Markdown 与数学公式；行内公式写作 $x^2$，独立公式写作 $$…$$。</p>
       </div></details>
       <details id="editor-home" open><summary>站点名称与首页</summary><div className="editor-panel-body">
         {editField("团队名称", ["siteName"], content.siteName, true, true)}
         {editField("机构名称", ["institution"], content.institution)}
-        {editField("首页英文短语", ["hero", "eyebrow"], content.hero.eyebrow)}
-        {editField("首页主标题（换行会保留）", ["hero", "title"], content.hero.title, true, true)}
-        {editField("首页副标题", ["hero", "subtitle"], content.hero.subtitle, true, true)}
-        {editField("首页介绍", ["hero", "detail"], content.hero.detail, true)}
+        {editField("课题组简介正文", ["hero", "detail"], content.hero.detail, true)}
         {imageField("首页背景图", ["hero", "background"], content.hero.background)}
-        <SizeControl label="首页背景图可见度" value={Math.round(content.hero.backgroundVisibility * 100)} min={0} max={100} unit="%" onChange={(value) => write(["hero", "backgroundVisibility"], value / 100)} />
-        <p className="editor-help">0% 为纯浅蓝底色，100% 为原图；可在实时预览区查看调整效果。</p>
+        <SizeControl label="校园背景图显示强度" value={Math.round(content.hero.backgroundVisibility * 100)} min={0} max={100} unit="%" onChange={(value) => write(["hero", "backgroundVisibility"], value / 100)} />
+        <p className="editor-help">数值调整校园图的显示强度，始终保留浅色遮罩；可在实时预览区查看效果。</p>
         <h3>首页右侧最新动态</h3>
-        <label className="editor-field"><span>点击卡片后打开</span><select value={content.hero.featureTargetSlug} onChange={(event) => { const slug = event.target.value; selectPreview(["hero", "featureTargetSlug"]); commit((next) => { next.hero.featureTargetSlug = slug; next.hero.featureArticleId = ""; }); }}>
-          <option value="">团队动态栏目</option>
-          {newsOptions.map((item) => <option value={item.slug} key={item.slug}>{item.title}</option>)}
-          {content.hero.featureTargetSlug && !featuredNews && <option value={content.hero.featureTargetSlug}>原链接已失效，请重新选择</option>}
-        </select></label>
-        {featuredNews && <label className="editor-field"><span>指定新闻稿（可选）</span><select value={featuredArticle?.id ?? ""} onChange={(event) => write(["hero", "featureArticleId"], event.target.value)}>
-          <option value="">打开{featuredNews.title}列表</option>
-          {featuredNews.newsArticles.filter((article) => article.status !== "draft").map((article) => <option value={article.id} key={article.id}>{article.title || "未命名新闻稿"}{article.date ? ` · ${article.date}` : ""}</option>)}
-        </select></label>}
-        <div className="editor-feature-source"><span>可单独修改下方文案和图片；选择链接后也可引用该子栏目的现有内容。</span><button type="button" disabled={!featuredNews} onClick={() => {
-          if (!featuredNews) return;
-          selectPreview(["hero", "featureTitle"]);
-          commit((next) => {
-            next.hero.featureLabel = featuredNews.english;
-            next.hero.featureTitle = featuredArticle?.title || featuredNews.title;
-            next.hero.featureText = featuredArticle?.summary || featuredNews.summary || featuredNews.description;
-            const image = featuredArticle?.thumbnail || featuredNews.cover;
-            if (image) next.hero.featureImage = image;
-          });
-        }}>引用所选动态内容</button></div>
-        {editField("栏目提示", ["hero", "featureLabel"], content.hero.featureLabel)}
-        {editField("标题", ["hero", "featureTitle"], content.hero.featureTitle, true, true)}
-        {editField("简介", ["hero", "featureText"], content.hero.featureText, true)}
-        {imageField("新闻照片或论文封面", ["hero", "featureImage"], content.hero.featureImage)}
+        <div className="editor-feature-source"><span>首页自动按日期展示最近 5 条已发布新闻。请在新闻稿栏目维护内容。</span><button type="button" onClick={() => jump("news-posts")}>编辑新闻稿</button></div>
       </div></details>
 
       <details id="editor-sections"><summary>栏目说明与页面底图</summary><div className="editor-panel-body">
@@ -565,28 +633,47 @@ function Editor({ initial, role, email, accountId, environment, peerOrigin }: {
 
       <details id="editor-directions"><summary>研究方向 · {content.directions.length} 项</summary><div className="editor-panel-body">
         {content.directions.map((direction, index) => <div className="editor-item" id={`editor-directions-${index}`} key={direction.slug}><div className="editor-item-head"><h3>{direction.title || `方向 ${index + 1}`}</h3><div><button onClick={() => move(["directions"], index, -1)}>上移</button><button onClick={() => move(["directions"], index, 1)}>下移</button><button onClick={() => remove(["directions"], index)}>删除</button></div></div>
-          {editField("方向名称", ["directions", index, "title"], direction.title, true, true)}{editField("英文短标题", ["directions", index, "english"], direction.english)}{editField("方向介绍", ["directions", index, "summary"], direction.summary, true)}{editField("融入图片的数学公式", ["directions", index, "equation"], direction.equation, true)}{imageField("方向主图", ["directions", index, "image"], direction.image)}
+          {editField("方向名称", ["directions", index, "title"], direction.title, true, true)}{editField("英文短标题", ["directions", index, "english"], direction.english)}{editField("方向介绍", ["directions", index, "summary"], direction.summary, true)}{editField("数学公式", ["directions", index, "equation"], direction.equation, true)}{imageField("方向主图", ["directions", index, "image"], direction.image)}
           <h4>研究内容</h4>{direction.topics.map((topic, topicIndex) => <div className="editor-subitem" key={topicIndex}>{editField("小主题标题", ["directions", index, "topics", topicIndex, "title"], topic.title)}{editField("具体内容", ["directions", index, "topics", topicIndex, "detail"], topic.detail, true)}{imageField("主题示意图", ["directions", index, "topics", topicIndex, "image"], topic.image)}<button onClick={() => remove(["directions", index, "topics"], topicIndex)}>删除小主题</button></div>)}
           <button className="editor-add" onClick={() => add(["directions", index, "topics"], { title: "", detail: "", image: "" })}>＋ 添加小主题</button>
-          <PhotoComposer title="论文与研究图片" mobile={mobileMode} items={direction.papers.map((paper) => ({ label: paper.title, image: paper.image, layout: mobileMode ? paper.layoutMobile : paper.layout }))} onLayout={(paperIndex, layout) => write(["directions", index, "papers", paperIndex, mobileMode ? "layoutMobile" : "layout"], layout)} onPreset={(layouts) => arrange(["directions", index, "papers"], layouts, mobileMode ? "layoutMobile" : "layout")} onAdd={() => add(["directions", index, "papers"], { title: "新图片", description: "", image: "", url: "" })} onUpload={(paperIndex, file) => void upload(file, ["directions", index, "papers", paperIndex, "image"])} onEdit={(paperIndex) => jumpToImage(`editor-direction-${index}-paper-${paperIndex}`)} onReorder={(paperIndex, step) => move(["directions", index, "papers"], paperIndex, step)} onDelete={(paperIndex) => remove(["directions", index, "papers"], paperIndex)} />
-          <h4>论文与研究图片</h4>{direction.papers.map((paper, paperIndex) => <div className="editor-subitem" id={`editor-direction-${index}-paper-${paperIndex}`} key={paperIndex}>{editField("标题", ["directions", index, "papers", paperIndex, "title"], paper.title)}{editField("说明", ["directions", index, "papers", paperIndex, "description"], paper.description, true)}{editField("论文、新闻稿或详情链接", ["directions", index, "papers", paperIndex, "url"], paper.url)}<label className="editor-upload">上传论文 PDF / DOCX<input type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadDocument(file, ["directions", index, "papers", paperIndex, "url"]); event.target.value = ""; }} /></label>{imageField("论文封面或结果图", ["directions", index, "papers", paperIndex, "image"], paper.image)}<button onClick={() => remove(["directions", index, "papers"], paperIndex)}>删除展示项</button></div>)}
+          <h4>论文与研究图片</h4>{direction.papers.map((paper, paperIndex) => <div className="editor-subitem" id={`editor-direction-${index}-paper-${paperIndex}`} key={paperIndex}>
+            {editField("标题", ["directions", index, "papers", paperIndex, "title"], paper.title)}
+            {editField("说明", ["directions", index, "papers", paperIndex, "description"], paper.description, true)}
+            {editField("论文、新闻稿或详情链接", ["directions", index, "papers", paperIndex, "url"], paper.url)}
+            <label className="editor-upload">上传论文 PDF / DOCX<input type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadDocument(file, ["directions", index, "papers", paperIndex, "url"]); event.target.value = ""; }} /></label>
+            {imageField("论文封面或结果图", ["directions", index, "papers", paperIndex, "image"], paper.image)}
+            <div className="editor-image-actions"><button type="button" disabled={paperIndex === 0} onClick={() => move(["directions", index, "papers"], paperIndex, -1)}>上移展示项</button><button type="button" disabled={paperIndex === direction.papers.length - 1} onClick={() => move(["directions", index, "papers"], paperIndex, 1)}>下移展示项</button><button type="button" onClick={() => remove(["directions", index, "papers"], paperIndex)}>删除展示项</button></div>
+          </div>)}
           <button className="editor-add" onClick={() => add(["directions", index, "papers"], { title: "", description: "", image: "", url: "" })}>＋ 添加论文或图片</button>
-          {subsectionEditor(["directions", index, "subsections"], direction.subsections)}
+          {subsectionEditor(["directions", index, "subsections"], direction.subsections, true)}
         </div>)}
         <button className="editor-add" onClick={() => add(["directions"], { slug: `direction-${Date.now()}`, title: "新研究方向", english: "RESEARCH", summary: "", image: "", equation: "", topics: [], papers: [], subsections: [] } satisfies DirectionItem)}>＋ 添加研究方向</button>
       </div></details>
 
       <details id="editor-archives"><summary>研究成果、团队动态与其他 · {content.archives.length} 个栏目</summary><div className="editor-panel-body">
         {content.archives.map((archive, index) => <div className="editor-item" id={`editor-archives-${index}`} key={archive.slug}><div className="editor-item-head"><h3>{archive.title}</h3><div><button onClick={() => move(["archives"], index, -1)}>上移</button><button onClick={() => move(["archives"], index, 1)}>下移</button><button onClick={() => remove(["archives"], index)}>删除</button></div></div>
-          <label className="editor-field"><span>所属栏目</span><select value={archive.homeAnchor} onChange={(event) => { write(["archives", index, "homeAnchor"], event.target.value); write(["archives", index, "group"], event.target.value === "news" ? "团队动态" : event.target.value === "other" ? "其他" : "研究成果"); }}><option value="outcomes">研究成果</option><option value="news">团队动态</option><option value="other">其他</option></select></label>
-          {editField("栏目标题", ["archives", index, "title"], archive.title, true, true)}{editField("英文短标题", ["archives", index, "english"], archive.english)}{editField("首页简述", ["archives", index, "summary"], archive.summary, true)}{editField("详情页介绍", ["archives", index, "description"], archive.description, true)}{imageField("首页栏目封面", ["archives", index, "cover"], archive.cover)}
-          <PhotoComposer title="图片资料" mobile={mobileMode} items={archive.gallery.map((item) => ({ label: item.label, image: item.image, layout: mobileMode ? item.layoutMobile : item.layout }))} onLayout={(galleryIndex, layout) => write(["archives", index, "gallery", galleryIndex, mobileMode ? "layoutMobile" : "layout"], layout)} onPreset={(layouts) => arrange(["archives", index, "gallery"], layouts, mobileMode ? "layoutMobile" : "layout")} onAdd={() => add(["archives", index, "gallery"], { label: "新图片", image: "", caption: "" })} onUpload={(galleryIndex, file) => void upload(file, ["archives", index, "gallery", galleryIndex, "image"])} onEdit={(galleryIndex) => jumpToImage(`editor-archive-${index}-gallery-${galleryIndex}`)} onReorder={(galleryIndex, step) => move(["archives", index, "gallery"], galleryIndex, step)} onDelete={(galleryIndex) => remove(["archives", index, "gallery"], galleryIndex)} />
-          <h4>图片资料</h4>{archive.gallery.map((item, galleryIndex) => <div className="editor-subitem" id={`editor-archive-${index}-gallery-${galleryIndex}`} key={galleryIndex}>{editField("图片标题", ["archives", index, "gallery", galleryIndex, "label"], item.label)}{editField("图片说明", ["archives", index, "gallery", galleryIndex, "caption"], item.caption, true)}{imageField("资料图片", ["archives", index, "gallery", galleryIndex, "image"], item.image)}<button onClick={() => remove(["archives", index, "gallery"], galleryIndex)}>删除图片位</button></div>)}
+          <label className="editor-field"><span>所属栏目</span><select value={archive.homeAnchor} onChange={(event) => {
+            const destination = event.target.value;
+            selectPreview(["archives", index, "homeAnchor"], destination);
+            commit((next) => {
+              next.archives[index].homeAnchor = destination;
+              next.archives[index].group = destination === "news" ? "团队动态" : destination === "other" ? "其他" : "研究成果";
+            });
+          }}><option value="outcomes">研究成果</option><option value="news">团队动态</option><option value="other">其他</option></select></label>
+          {editField("栏目标题", ["archives", index, "title"], archive.title, true, true)}{editField("英文短标题", ["archives", index, "english"], archive.english)}{editField("栏目简述", ["archives", index, "summary"], archive.summary, true)}{editField("详情页介绍", ["archives", index, "description"], archive.description, true)}{imageField("首页栏目封面", ["archives", index, "cover"], archive.cover)}
+          <h4>图片资料</h4>{archive.gallery.map((item, galleryIndex) => <div className="editor-subitem" id={`editor-archive-${index}-gallery-${galleryIndex}`} key={galleryIndex}>
+            {editField("图片标题", ["archives", index, "gallery", galleryIndex, "label"], item.label)}
+            {editField("图片说明", ["archives", index, "gallery", galleryIndex, "caption"], item.caption, true)}
+            {imageField("资料图片", ["archives", index, "gallery", galleryIndex, "image"], item.image)}
+            <div className="editor-image-actions"><button type="button" disabled={galleryIndex === 0} onClick={() => move(["archives", index, "gallery"], galleryIndex, -1)}>上移图片</button><button type="button" disabled={galleryIndex === archive.gallery.length - 1} onClick={() => move(["archives", index, "gallery"], galleryIndex, 1)}>下移图片</button><button type="button" onClick={() => remove(["archives", index, "gallery"], galleryIndex)}>删除图片位</button></div>
+          </div>)}
           <button className="editor-add" onClick={() => add(["archives", index, "gallery"], { label: "新图片", image: "", caption: "" })}>＋ 添加图片</button>
-          <h4>条目表格</h4><div className="editor-columns">{archive.columns.map((column, columnIndex) => <Field key={columnIndex} label={`第 ${columnIndex + 1} 列`} value={column} onChange={(value) => write(["archives", index, "columns", columnIndex], value)} />)}</div>
-          {archive.rows.map((row, rowIndex) => <div className="editor-subitem" key={rowIndex}><strong>第 {rowIndex + 1} 条</strong><div className="editor-columns">{archive.columns.map((column, columnIndex) => <Field key={columnIndex} label={column} value={row[columnIndex] ?? ""} onChange={(value) => write(["archives", index, "rows", rowIndex, columnIndex], value)} />)}</div><button onClick={() => remove(["archives", index, "rows"], rowIndex)}>删除条目</button></div>)}
+          <h4>条目表格</h4>
+          {archive.slug === "publications" && <p className="editor-help">在“题目”中填写论文名称，在“链接”中填写原文网址或 DOI。页面仅通过论文标题链接到该地址，并在新标签页打开，不单独显示链接列。</p>}
+          <div className="editor-columns">{archive.columns.map((column, columnIndex) => <Field key={columnIndex} label={`第 ${columnIndex + 1} 列`} value={column} onChange={(value) => write(["archives", index, "columns", columnIndex], value)} />)}</div>
+          {archive.rows.map((row, rowIndex) => <div className="editor-subitem" id={`editor-archive-${index}-row-${rowIndex}`} key={rowIndex}><strong>第 {rowIndex + 1} 条</strong><div className="editor-columns">{archive.columns.map((column, columnIndex) => <Field key={columnIndex} label={column} value={row[columnIndex] ?? ""} onChange={(value) => write(["archives", index, "rows", rowIndex, columnIndex], value)} />)}</div><button onClick={() => remove(["archives", index, "rows"], rowIndex)}>删除条目</button></div>)}
           <button className="editor-add" onClick={() => add(["archives", index, "rows"], archive.columns.map(() => ""))}>＋ 添加表格条目</button>
-          {subsectionEditor(["archives", index, "subsections"], archive.subsections)}
+          {subsectionEditor(["archives", index, "subsections"], archive.subsections, true)}
         </div>)}
         <button className="editor-add" onClick={() => add(["archives"], { slug: `archive-${Date.now()}`, group: "其他", homeAnchor: "other", title: "新栏目", english: "MORE", description: "", summary: "", cover: "", gallery: [], columns: ["标题", "内容", "链接"], rows: [], subsections: [], newsArticles: [] } satisfies ArchiveItem)}>＋ 添加成果 / 动态模块</button>
       </div></details>
@@ -632,14 +719,23 @@ function Editor({ initial, role, email, accountId, environment, peerOrigin }: {
         {content.customSections.map((section, index) => <div className="editor-item" id={`editor-custom-${index}`} key={section.id}>
           <div className="editor-item-head"><h3>{section.title || `栏目 ${index + 1}`}</h3><div><button type="button" onClick={() => move(["customSections"], index, -1)}>上移</button><button type="button" onClick={() => move(["customSections"], index, 1)}>下移</button><button type="button" onClick={() => remove(["customSections"], index)}>删除栏目</button></div></div>
           {editField("栏目标题", ["customSections", index, "title"], section.title, true, true)}
-          {editField("英文短标题", ["customSections", index, "english"], section.english)}
+          {section.id !== "education" && editField("英文短标题", ["customSections", index, "english"], section.english)}
           {editField("栏目说明", ["customSections", index, "intro"], section.intro, true)}
           {editField("主要内容", ["customSections", index, "body"], section.body, true)}
           {imageField("栏目主图", ["customSections", index, "image"], section.image)}
-          <PhotoComposer title="栏目图片组合" mobile={mobileMode} items={section.items.map((item) => ({ label: item.title, image: item.image, layout: mobileMode ? item.layoutMobile : item.layout }))} onLayout={(itemIndex, layout) => write(["customSections", index, "items", itemIndex, mobileMode ? "layoutMobile" : "layout"], layout)} onPreset={(layouts) => arrange(["customSections", index, "items"], layouts, mobileMode ? "layoutMobile" : "layout")} onAdd={() => add(["customSections", index, "items"], { title: "新图片", description: "", image: "", url: "" })} onUpload={(itemIndex, file) => void upload(file, ["customSections", index, "items", itemIndex, "image"])} onEdit={(itemIndex) => jumpToImage(`editor-custom-${index}-image-${itemIndex}`)} onReorder={(itemIndex, step) => move(["customSections", index, "items"], itemIndex, step)} onDelete={(itemIndex) => remove(["customSections", index, "items"], itemIndex)} />
+          {section.id === "education"
+            ? <button type="button" className="editor-add" onClick={() => add(["customSections", index, "items"], { title: "新图片", description: "", image: "", url: "" })}>＋ 添加图片</button>
+            : <PhotoComposer title="栏目图片组合" mobile={mobileMode} items={section.items.map((item) => ({ label: item.title, image: item.image, layout: mobileMode ? item.layoutMobile : item.layout }))} onLayout={(itemIndex, layout) => write(["customSections", index, "items", itemIndex, mobileMode ? "layoutMobile" : "layout"], layout)} onPreset={(layouts) => arrange(["customSections", index, "items"], layouts, mobileMode ? "layoutMobile" : "layout")} onAdd={() => add(["customSections", index, "items"], { title: "新图片", description: "", image: "", url: "" })} onUpload={(itemIndex, file) => void upload(file, ["customSections", index, "items", itemIndex, "image"])} onEdit={(itemIndex) => jumpToImage(`editor-custom-${index}-image-${itemIndex}`)} onReorder={(itemIndex, step) => move(["customSections", index, "items"], itemIndex, step)} onDelete={(itemIndex) => remove(["customSections", index, "items"], itemIndex)} />}
           <h4>栏目图片与链接</h4>
-          {section.items.map((item, itemIndex) => <div className="editor-subitem" id={`editor-custom-${index}-image-${itemIndex}`} key={itemIndex}>{editField("图片标题", ["customSections", index, "items", itemIndex, "title"], item.title)}{editField("图片说明", ["customSections", index, "items", itemIndex, "description"], item.description, true)}{editField("详情链接", ["customSections", index, "items", itemIndex, "url"], item.url)}{imageField("照片", ["customSections", index, "items", itemIndex, "image"], item.image)}<button type="button" onClick={() => remove(["customSections", index, "items"], itemIndex)}>删除图片</button></div>)}
-          {subsectionEditor(["customSections", index, "subsections"], section.subsections)}
+          {section.items.map((item, itemIndex) => <div className="editor-subitem" id={`editor-custom-${index}-image-${itemIndex}`} key={itemIndex}>
+            {editField("图片标题", ["customSections", index, "items", itemIndex, "title"], item.title)}
+            {editField("图片说明", ["customSections", index, "items", itemIndex, "description"], item.description, true)}
+            {editField("详情链接", ["customSections", index, "items", itemIndex, "url"], item.url)}
+            {imageField("照片", ["customSections", index, "items", itemIndex, "image"], item.image)}
+            {section.id === "education" && <div className="editor-image-actions"><button type="button" disabled={itemIndex === 0} onClick={() => move(["customSections", index, "items"], itemIndex, -1)}>上移图片</button><button type="button" disabled={itemIndex === section.items.length - 1} onClick={() => move(["customSections", index, "items"], itemIndex, 1)}>下移图片</button></div>}
+            <button type="button" onClick={() => remove(["customSections", index, "items"], itemIndex)}>删除图片</button>
+          </div>)}
+          {subsectionEditor(["customSections", index, "subsections"], section.subsections, section.id === "education")}
         </div>)}
       </div></details>
     </div>

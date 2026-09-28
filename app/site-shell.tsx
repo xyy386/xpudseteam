@@ -1,26 +1,34 @@
+/* eslint-disable @next/next/no-html-link-for-pages -- Public navigation loads each page and its styles together instead of mixing document and client transitions. */
 import type { SiteContent } from "./content";
+import { BrandLogos } from "./brand-logos";
 import { MarkdownInline, MarkdownText } from "./markdown";
 
 export function SiteHeader({ content, active = "home" }: { content: SiteContent; active?: string }) {
+  const education = content.customSections.find((section) => section.id === "education");
   const links = [
     ["team", content.sectionTitles.team],
     ["research", content.sectionTitles.research],
     ["outcomes", content.sectionTitles.outcomes],
+    ...(education ? [["custom/education", education.title] as const] : []),
     ["news", content.sectionTitles.news],
     ["other", content.sectionTitles.other],
   ] as const;
   return <header className="site-header"><div className="container header-inner">
-    <a className="brand" href="/"><span className="brand-monogram">数研</span><span><strong><MarkdownInline source={content.siteName} /></strong><small><MarkdownInline source={content.institution} /></small></span></a>
-    <nav className="main-nav" aria-label="主导航">
-      {links.map(([slug, label]) => <a href={`/${slug}`} aria-current={active === slug ? "page" : undefined} key={slug}><MarkdownInline source={label} /></a>)}
-      {content.customSections.map((section) => <a href={`/custom/${section.id}`} aria-current={active === `custom-${section.id}` ? "page" : undefined} key={section.id}><MarkdownInline source={section.title} /></a>)}
-      <a href="/#contact">联系我们</a><a href="/editor-login">编辑网站</a>
+    <div className="brand"><BrandLogos /><a className="brand-copy" href="/"><strong><MarkdownInline source={content.siteName} /></strong>{content.institution.trim() && <small><MarkdownInline source={content.institution} /></small>}</a></div>
+  </div><div className="site-navigation"><nav className="main-nav container" aria-label="主导航">
+      <a href="/" aria-current={active === "home" ? "page" : undefined}>首页</a>
+      {links.map(([slug, label]) => <a href={`/${slug}`} aria-current={active === (slug === "custom/education" ? "custom-education" : slug) ? "page" : undefined} key={slug}><MarkdownInline source={label} /></a>)}
+      {content.customSections.filter((section) => section.id !== "education").map((section) => <a href={`/custom/${section.id}`} aria-current={active === `custom-${section.id}` ? "page" : undefined} key={section.id}><MarkdownInline source={section.title} /></a>)}
+      <a href="/contact" aria-current={active === "contact" ? "page" : undefined}>联系我们</a>
     </nav>
   </div></header>;
 }
 
-export function SiteFooter({ content }: { content: SiteContent }) {
-  return <footer><div className="container footer-inner"><div><strong><MarkdownInline source={content.siteName} /></strong><p><MarkdownInline source={content.institution} /></p></div></div></footer>;
+export function SiteFooter() {
+  return <footer className="site-footer"><div className="site-footer-inner">
+    <p className="site-footer-copyright">Copyright 版权所有 © 西安工程大学数据驱动科学工程建模与计算团队 版权所有</p>
+    <p className="site-footer-address">地址：陕西省西安市临潼区陕鼓大道58号</p>
+  </div></footer>;
 }
 
 export function SectionTitle({ number, title, english, intro, level = 2 }: { number: string; title: string; english: string; intro?: string; level?: 1 | 2 }) {

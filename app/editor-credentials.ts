@@ -1,11 +1,10 @@
 import { env } from "cloudflare:workers";
 import { cookies } from "next/headers";
-import { getChatGPTUser } from "./chatgpt-auth";
+import { randomSecret, sha256, verifyPassword, hashPassword, validPassword } from "../lib/editor-password";
+export { randomSecret, sha256, hashPassword, normalizedEmail, validPassword } from "../lib/editor-password";
 
 export const SESSION_COOKIE = "research_editor_session";
-export const MEMBER_MODE_COOKIE = "research_editor_mode";
-// The production Workers runtime supports at most 100,000 PBKDF2 iterations.
-const PASSWORD_ITERATIONS = 100_000;
+const LEGACY_MEMBER_MODE_COOKIE = "research_editor_mode";
 const SESSION_LIFETIME = 12 * 60 * 60 * 1000;
 
 export type EditorIdentity =
@@ -13,65 +12,13 @@ export type EditorIdentity =
   | { role: "member"; email: string; id: string; expiresAt: number };
 
 type AccountRow = {
-  id: string; email: string; password_hash: string; expires_at: number;
+  id: string; email: string; role: "owner" | "member"; password_hash: string; expires_at: number;
   revoked_at: number | null; failed_attempts: number; locked_until: number | null;
 };
 
 function database() {
   if (!env.DB) throw new Error("内容数据库不可用");
   return env.DB;
-}
-
-function bytesToBase64url(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-function base64urlToBytes(value: string): Uint8Array {
-  const binary = atob(value.replace(/-/g, "+").replace(/_/g, "/"));
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
-}
-
-export function randomSecret(size = 24): string {
-  return bytesToBase64url(crypto.getRandomValues(new Uint8Array(size)));
-}
-
-export async function sha256(value: string): Promise<string> {
-  return bytesToBase64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value))));
-}
-
-export async function hashPassword(password: string): Promise<string> {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
-  const hash = new Uint8Array(await crypto.subtle.deriveBits({ name: "PBKDF2", salt, iterations: PASSWORD_ITERATIONS, hash: "SHA-256" }, key, 256));
-  return `pbkdf2-sha256$${PASSWORD_ITERATIONS}$${bytesToBase64url(salt)}$${bytesToBase64url(hash)}`;
-}
-
-export async function verifyPassword(password: string, stored: string): Promise<boolean> {
-  const [method, iterationText, saltText, expectedText] = stored.split("$");
-  const iterations = Number(iterationText);
-  if (method !== "pbkdf2-sha256" || !Number.isInteger(iterations) || iterations < 100_000 || iterations > PASSWORD_ITERATIONS || !saltText || !expectedText) return false;
-  try {
-    const salt = base64urlToBytes(saltText);
-    const expected = base64urlToBytes(expectedText);
-    if (salt.length !== 16 || expected.length !== 32) return false;
-    const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
-    const actual = new Uint8Array(await crypto.subtle.deriveBits({ name: "PBKDF2", salt: new Uint8Array(salt), iterations, hash: "SHA-256" }, key, 256));
-    let mismatch = 0;
-    for (let index = 0; index < actual.length; index++) mismatch |= actual[index] ^ expected[index];
-    return mismatch === 0;
-  } catch { return false; }
-}
-
-export function validPassword(password: unknown): password is string {
-  return typeof password === "string" && password.length >= 12 && password.length <= 128;
-}
-
-export function normalizedEmail(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const email = value.trim().toLowerCase();
-  return email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null;
 }
 
 export function sameOrigin(request: Request): boolean {
@@ -87,75 +34,86 @@ export function clearSessionCookie(request: Request): string {
   return sessionCookie("", request, 0);
 }
 
-export function memberModeCookie(request: Request, maxAge = 30 * 24 * 60 * 60): string {
+export function clearLegacyMemberModeCookie(request: Request): string {
   const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
-  return `${MEMBER_MODE_COOKIE}=${maxAge ? "member" : ""}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`;
+  return `${LEGACY_MEMBER_MODE_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`;
 }
 
 export async function getEditorIdentity(): Promise<EditorIdentity | null> {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(SESSION_COOKIE)?.value;
-  if (cookieStore.get(MEMBER_MODE_COOKIE)?.value === "member" || token !== undefined) {
-    // A member session selects the member role, even when ChatGPT is also signed in.
-    // An expired or revoked session must not silently fall back to owner privileges.
-    if (!token || !/^[A-Za-z0-9_-]{40,80}$/.test(token)) return null;
-    const tokenHash = await sha256(token);
+  const token = (await cookies()).get(SESSION_COOKIE)?.value;
+  if (!token || !/^[A-Za-z0-9_-]{40,80}$/.test(token)) return null;
+  try {
     const now = Date.now();
-    try {
-      const row = await database().prepare(`SELECT a.id, a.email, a.expires_at
-        FROM editor_sessions s JOIN editor_accounts a ON a.id = s.account_id
-        WHERE s.token_hash = ? AND s.expires_at > ? AND a.expires_at > ? AND a.revoked_at IS NULL`).bind(tokenHash, now, now).first<{ id: string; email: string; expires_at: number }>();
-      return row ? { role: "member", id: row.id, email: row.email, expiresAt: row.expires_at } : null;
-    } catch (error) {
-      console.error("Editor identity lookup failed", error);
-      return null;
-    }
+    const row = await database().prepare(`SELECT a.id, a.email, a.role, a.expires_at
+      FROM editor_sessions s JOIN editor_accounts a ON a.id = s.account_id
+      WHERE s.token_hash = ? AND s.expires_at > ? AND a.revoked_at IS NULL
+        AND (a.role = 'owner' OR (a.role = 'member' AND a.expires_at > ?))`)
+      .bind(await sha256(token), now, now).first<Pick<AccountRow, "id" | "email" | "role" | "expires_at">>();
+    if (!row) return null;
+    return row.role === "owner" ? { role: "owner", id: row.id, email: row.email }
+      : { role: "member", id: row.id, email: row.email, expiresAt: row.expires_at };
+  } catch (error) {
+    console.error("Editor identity lookup failed", error);
+    return null;
   }
-  const chatgpt = await getChatGPTUser();
-  const ownerEmail = env.SITE_EDITOR_EMAIL?.trim().toLowerCase();
-  if (chatgpt && (ownerEmail ? chatgpt.email.toLowerCase() === ownerEmail : import.meta.env.DEV && chatgpt.email === "seedy@sites.test")) {
-    return { role: "owner", email: chatgpt.email, id: chatgpt.userId };
-  }
-  return null;
 }
 
 export async function isSiteOwner(): Promise<boolean> {
   return (await getEditorIdentity())?.role === "owner";
 }
 
-export async function loginMember(email: string, password: string, request: Request): Promise<string | null> {
+export async function loginEditor(email: string, password: string, request: Request): Promise<string | null> {
+  if (!validPassword(password)) return null;
   const now = Date.now();
-  const account = await database().prepare("SELECT id, email, password_hash, expires_at, revoked_at, failed_attempts, locked_until FROM editor_accounts WHERE email = ?").bind(email).first<AccountRow>();
-  if (!account || account.revoked_at !== null || account.expires_at <= now || (account.locked_until ?? 0) > now) return null;
-  const valid = await verifyPassword(password, account.password_hash);
-  if (!valid) {
-    const failures = account.failed_attempts + 1;
-    await database().prepare("UPDATE editor_accounts SET failed_attempts = ?, locked_until = ? WHERE id = ?")
-      .bind(failures, failures >= 5 ? now + 15 * 60_000 : null, account.id).run();
+  const account = await database().prepare("SELECT id, email, role, password_hash, expires_at, revoked_at, failed_attempts, locked_until FROM editor_accounts WHERE email = ?").bind(email).first<AccountRow>();
+  if (!account || !["owner", "member"].includes(account.role) || account.revoked_at !== null
+    || (account.role === "member" && account.expires_at <= now) || (account.locked_until ?? 0) > now) return null;
+  if (!(await verifyPassword(password, account.password_hash))) {
+    await database().prepare(`UPDATE editor_accounts SET failed_attempts = failed_attempts + 1,
+      locked_until = CASE WHEN failed_attempts + 1 >= 5 THEN ? ELSE locked_until END
+      WHERE id = ? AND password_hash = ? AND COALESCE(locked_until, 0) <= ?`)
+      .bind(now + 15 * 60_000, account.id, account.password_hash, now).run();
     return null;
   }
   const token = randomSecret(32);
-  const expiresAt = Math.min(account.expires_at, now + SESSION_LIFETIME);
-  await database().batch([
-    database().prepare("UPDATE editor_accounts SET failed_attempts = 0, locked_until = NULL WHERE id = ?").bind(account.id),
-    database().prepare("INSERT INTO editor_sessions (token_hash, account_id, expires_at, created_at) VALUES (?, ?, ?, ?)").bind(await sha256(token), account.id, expiresAt, now),
+  const issuedAt = Date.now();
+  const expiresAt = account.role === "owner" ? issuedAt + SESSION_LIFETIME
+    : Math.min(account.expires_at, issuedAt + SESSION_LIFETIME);
+  // Recheck the verified hash inside the write: a concurrent reset must not mint a new session.
+  const results = await database().batch([
+    database().prepare(`UPDATE editor_accounts SET failed_attempts = 0, locked_until = NULL
+      WHERE id = ? AND password_hash = ? AND COALESCE(locked_until, 0) <= ?`)
+      .bind(account.id, account.password_hash, issuedAt),
+    database().prepare(`INSERT INTO editor_sessions (token_hash, account_id, expires_at, created_at)
+      SELECT ?, id, ?, ? FROM editor_accounts WHERE id = ? AND password_hash = ? AND revoked_at IS NULL
+        AND role = ? AND (role = 'owner' OR (role = 'member' AND expires_at > ?))
+        AND COALESCE(locked_until, 0) <= ?`)
+      .bind(await sha256(token), expiresAt, issuedAt, account.id, account.password_hash, account.role, issuedAt, issuedAt),
   ]);
-  return sessionCookie(token, request, Math.max(0, Math.floor((expiresAt - now) / 1000)));
+  if (results[1].meta.changes !== 1) return null;
+  return sessionCookie(token, request, Math.max(0, Math.floor((expiresAt - issuedAt) / 1000)));
 }
 
-export async function logoutMember(token: string | undefined): Promise<void> {
+export async function logoutEditor(token: string | undefined): Promise<void> {
   if (token) await database().prepare("DELETE FROM editor_sessions WHERE token_hash = ?").bind(await sha256(token)).run();
 }
 
-export async function changeMemberPassword(identity: EditorIdentity, current: string, next: string): Promise<boolean> {
-  if (identity.role !== "member" || !validPassword(next)) return false;
-  const row = await database().prepare("SELECT password_hash FROM editor_accounts WHERE id = ? AND revoked_at IS NULL AND expires_at > ?")
+export async function changeEditorPassword(identity: EditorIdentity, current: string, next: string): Promise<boolean> {
+  if (!validPassword(current) || !validPassword(next)) return false;
+  const row = await database().prepare(`SELECT password_hash FROM editor_accounts WHERE id = ? AND revoked_at IS NULL
+    AND (role = 'owner' OR (role = 'member' AND expires_at > ?))`)
     .bind(identity.id, Date.now()).first<{ password_hash: string }>();
   if (!row || !(await verifyPassword(current, row.password_hash))) return false;
   const passwordHash = await hashPassword(next);
-  await database().batch([
-    database().prepare("UPDATE editor_accounts SET password_hash = ?, updated_at = ? WHERE id = ?").bind(passwordHash, Date.now(), identity.id),
-    database().prepare("DELETE FROM editor_sessions WHERE account_id = ?").bind(identity.id),
+  const now = Date.now();
+  const results = await database().batch([
+    database().prepare(`UPDATE editor_accounts SET password_hash = ?, updated_at = ?, failed_attempts = 0, locked_until = NULL
+      WHERE id = ? AND password_hash = ? AND revoked_at IS NULL
+        AND (role = 'owner' OR (role = 'member' AND expires_at > ?))`)
+      .bind(passwordHash, now, identity.id, row.password_hash, now),
+    database().prepare(`DELETE FROM editor_sessions WHERE account_id = ?
+      AND EXISTS (SELECT 1 FROM editor_accounts WHERE id = ? AND password_hash = ?)`)
+      .bind(identity.id, identity.id, passwordHash),
   ]);
-  return true;
+  return results[0].meta.changes === 1;
 }

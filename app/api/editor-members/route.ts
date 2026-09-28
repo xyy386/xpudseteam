@@ -20,7 +20,7 @@ function validDays(value: unknown): number | null {
 export async function GET() {
   if (!(await isSiteOwner())) return Response.json({ error: "仅管理员可管理成员" }, { status: 403 });
   try {
-    const result = await database().prepare("SELECT id, email, expires_at, revoked_at, created_at FROM editor_accounts ORDER BY created_at DESC").all<MemberRow>();
+    const result = await database().prepare("SELECT id, email, expires_at, revoked_at, created_at FROM editor_accounts WHERE role = 'member' ORDER BY created_at DESC").all<MemberRow>();
     return Response.json({ members: result.results.map(publicMember) }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("List members failed", error);
@@ -37,12 +37,12 @@ export async function POST(request: Request) {
     const days = validDays(body.days);
     if (!email || !days) return Response.json({ error: "请输入有效邮箱及 1 至 365 天的有效期" }, { status: 400 });
     const current = await database().prepare("SELECT id FROM editor_accounts WHERE email = ?").bind(email).first<{ id: string }>();
-    if (current) return Response.json({ error: "该邮箱已有成员账号；可续期或重置密码" }, { status: 409 });
+    if (current) return Response.json({ error: "该邮箱已有账号，不能重复创建" }, { status: 409 });
     const now = Date.now();
     const password = randomSecret(18);
     const id = crypto.randomUUID();
     const expiresAt = now + days * 86_400_000;
-    await database().prepare("INSERT INTO editor_accounts (id, email, password_hash, expires_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
+    await database().prepare("INSERT INTO editor_accounts (id, email, role, password_hash, expires_at, created_at, updated_at) VALUES (?, ?, 'member', ?, ?, ?, ?)")
       .bind(id, email, await hashPassword(password), expiresAt, now, now).run();
     return Response.json({ member: { id, email, expiresAt, revokedAt: null, createdAt: now }, initialPassword: password }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
@@ -57,29 +57,29 @@ export async function PATCH(request: Request) {
   try {
     const body = await request.json() as { id?: unknown; action?: unknown; days?: unknown };
     if (typeof body.id !== "string") return Response.json({ error: "成员编号无效" }, { status: 400 });
-    const row = await database().prepare("SELECT id, email, expires_at, revoked_at, created_at FROM editor_accounts WHERE id = ?").bind(body.id).first<MemberRow>();
+    const row = await database().prepare("SELECT id, email, expires_at, revoked_at, created_at FROM editor_accounts WHERE id = ? AND role = 'member'").bind(body.id).first<MemberRow>();
     if (!row) return Response.json({ error: "成员不存在" }, { status: 404 });
     const now = Date.now();
     if (body.action === "renew") {
       const days = validDays(body.days);
       if (!days) return Response.json({ error: "请输入 1 至 365 天的续期天数" }, { status: 400 });
       const expiresAt = Math.max(now, row.expires_at) + days * 86_400_000;
-      await database().prepare("UPDATE editor_accounts SET expires_at = ?, revoked_at = NULL, updated_at = ? WHERE id = ?").bind(expiresAt, now, row.id).run();
+      await database().prepare("UPDATE editor_accounts SET expires_at = ?, revoked_at = NULL, updated_at = ? WHERE id = ? AND role = 'member'").bind(expiresAt, now, row.id).run();
       return Response.json({ ok: true, expiresAt });
     }
     if (body.action === "revoke") {
       await database().batch([
-        database().prepare("UPDATE editor_accounts SET revoked_at = ?, updated_at = ? WHERE id = ?").bind(now, now, row.id),
-        database().prepare("DELETE FROM editor_sessions WHERE account_id = ?").bind(row.id),
+        database().prepare("UPDATE editor_accounts SET revoked_at = ?, updated_at = ? WHERE id = ? AND role = 'member'").bind(now, now, row.id),
+        database().prepare("DELETE FROM editor_sessions WHERE account_id = ? AND account_id IN (SELECT id FROM editor_accounts WHERE role = 'member')").bind(row.id),
       ]);
       return Response.json({ ok: true });
     }
     if (body.action === "reset") {
       const password = randomSecret(18);
       await database().batch([
-        database().prepare("UPDATE editor_accounts SET password_hash = ?, failed_attempts = 0, locked_until = NULL, updated_at = ? WHERE id = ?")
+        database().prepare("UPDATE editor_accounts SET password_hash = ?, failed_attempts = 0, locked_until = NULL, updated_at = ? WHERE id = ? AND role = 'member'")
           .bind(await hashPassword(password), now, row.id),
-        database().prepare("DELETE FROM editor_sessions WHERE account_id = ?").bind(row.id),
+        database().prepare("DELETE FROM editor_sessions WHERE account_id = ? AND account_id IN (SELECT id FROM editor_accounts WHERE role = 'member')").bind(row.id),
       ]);
       return Response.json({ ok: true, initialPassword: password }, { headers: { "Cache-Control": "no-store" } });
     }
@@ -96,9 +96,11 @@ export async function DELETE(request: Request) {
   try {
     const body = await request.json() as { id?: unknown };
     if (typeof body.id !== "string") return Response.json({ error: "成员编号无效" }, { status: 400 });
+    const member = await database().prepare("SELECT id FROM editor_accounts WHERE id = ? AND role = 'member'").bind(body.id).first();
+    if (!member) return Response.json({ error: "成员不存在" }, { status: 404 });
     await database().batch([
-      database().prepare("DELETE FROM editor_sessions WHERE account_id = ?").bind(body.id),
-      database().prepare("DELETE FROM editor_accounts WHERE id = ?").bind(body.id),
+      database().prepare("DELETE FROM editor_sessions WHERE account_id = ? AND account_id IN (SELECT id FROM editor_accounts WHERE role = 'member')").bind(body.id),
+      database().prepare("DELETE FROM editor_accounts WHERE id = ? AND role = 'member'").bind(body.id),
     ]);
     return Response.json({ ok: true });
   } catch (error) {

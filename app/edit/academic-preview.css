@@ -1,0 +1,110 @@
+/* Visitor-page styling inside the editor; sizing remains controlled by appearanceStyle. */
+.editor-live .editor-live-stage {
+  background: #f5f6f8;
+}
+
+.editor-live .editor-live-site {
+  container-type: inline-size;
+  background: #fff;
+  color: #303840;
+  border-color: #d9dfe6;
+  box-shadow: none;
+}
+
+.editor-live .editor-live-site-header {
+  background: #fff;
+  border-color: #d9dfe6;
+  color: #234f83;
+}
+
+@container (max-width: 760px) {
+  .editor-live .editor-live-site-header { flex-direction: column; align-items: flex-start; gap: 14px; padding-inline: 18px; }
+  .editor-live .brand-logos { --brand-logo-height: 48px; gap: 12px; padding-right: 0; border-right: 0; }
+}
+
+.editor-live .editor-live-section {
+  background-color: #fff;
+}
+
+.editor-live .editor-live-section-head,
+.editor-live .editor-live-news-list,
+.editor-live .editor-live-news-row {
+  border-color: #d9dfe6;
+}
+
+.editor-live :is(.editor-live-card, .editor-live-detail, .editor-live-news-article),
+.editor-live .editor-live-topics > div {
+  background: #fff;
+}
+
+.editor-live .editor-live-card:not(.is-editing),
+.editor-live :is(.editor-live-detail, .editor-live-news-article),
+.editor-live .editor-live-topics > div {
+  border-color: #d9dfe6;
+  box-shadow: none;
+}
+
+.editor-live .editor-live-card-image {
+  background: #f5f6f8;
+  color: #737d87;
+}
+
+.editor-live :is(.editor-live-section-head h2, .editor-live-card h3,
+  .editor-live-detail > strong, .editor-live-topics h3, .editor-live-news-article > strong) {
+  color: #234f83;
+}
+
+.editor-live :is(.editor-live-card .markdown-content, .editor-live-news-row,
+  .editor-live-news-article) {
+  color: #303840;
+}
+
+.editor-live :is(.editor-live-site-header small, .editor-live-section-head .markdown-content,
+  .editor-live-card small, .editor-live-news-row time,
+  .editor-live-news-article time, .editor-live-news-article figcaption) {
+  color: #6c7681;
+}
+
+.editor-live :is(.editor-live-card button, .editor-live-direct-edit),
+.editor-live .editor-live-section .markdown-content a {
+  color: #234f83;
+  border-color: #b7c5d5;
+}
+
+.editor-live .editor-live-direct-edit {
+  background: #fff;
+}
+
+.editor-live .editor-live-section :is(.custom-section-body, .custom-section-image,
+  .photo-mosaic, .photo-mosaic-item, .photo-mosaic-caption, .photo-mosaic-empty) {
+  background: #fff;
+  border-color: #d9dfe6;
+  color: #303840;
+  box-shadow: none;
+}
+
+.editor-live .editor-live-section :is(.subsection-card, .subsection-image, .photo-mosaic-image) {
+  background: #f5f6f8;
+}
+
+.editor-live .editor-live-section .subsection-card:not(.is-editing) {
+  border-color: #d9dfe6;
+  box-shadow: none;
+}
+
+.editor-live .editor-live-section :is(.subsections-heading, .subsection-copy > a, .subsection-copy > button) {
+  border-color: #d9dfe6;
+}
+
+.editor-live .editor-live-section :is(.subsections-heading h2, .subsection-copy h3,
+  .photo-mosaic-caption h3, .photo-mosaic-caption a, .subsection-copy > a, .subsection-copy > button) {
+  color: #234f83;
+}
+
+.editor-live .editor-live-section :is(.subsection-copy, .photo-mosaic-caption .markdown-content) {
+  color: #303840;
+}
+
+.editor-live .editor-live-section :is(.subsections-heading span, .subsection-copy > small, .photo-mosaic-caption small) {
+  color: #6c7681;
+}

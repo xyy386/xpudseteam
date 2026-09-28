@@ -1,6 +1,6 @@
 {
   "siteName": "数据驱动的科学工程建模与计算团队",
-  "institution": "西安工程大学 · 科研团队",
+  "institution": "西安工程大学 理学院",
   "contact": "西安工程大学 数据驱动的科学工程建模与计算团队\n负责人：\n- 冯进钤 jqfeng15@xpu.edu.cn\n\n联系人：\n- 苏进 sujin@xpu.edu.cn\n- 郭琴 qinzhiyuna@163.com\n\n",
   "contactDetails": {
     "person": "",
@@ -136,7 +136,7 @@
     },
     {
       "name": "郭琴",
-      "role": "讲师 · 博士",
+      "role": "讲师 · 博士 · 博士生导师",
       "focus": "- 随机动力学\n- 网络动力学\n- 深度学习",
       "url": "https://math.xpu.edu.cn/info/1203/4496.htm",
       "photo": "/members/guo.jpg"
@@ -331,7 +331,7 @@
       "homeAnchor": "outcomes",
       "title": "论文与著作",
       "english": "PUBLICATIONS",
-      "description": "",
+      "description": "【示例，仅作展示】点击下方论文标题，可访问对应的期刊原文页面。",
       "imageLabels": [
         "论文封面",
         "方法示意图",
@@ -392,7 +392,15 @@
           }
         }
       ],
-      "rows": []
+      "rows": [
+        [
+          "2022",
+          "Data driven adaptive Gaussian mixture model for solving Fokker–Planck equation",
+          "Wenqing Sun; Jinqian Feng; Jin Su; Yunyun Liang",
+          "Chaos, 32(3), 033131\nDOI: 10.1063/5.0083822",
+          "https://pubs.aip.org/aip/cha/article-abstract/32/3/033131/2835792/Data-driven-adaptive-Gaussian-mixture-model-for?redirectedFrom=fulltext"
+        ]
+      ]
     },
     {
       "slug": "projects",
@@ -400,7 +408,7 @@
       "homeAnchor": "outcomes",
       "title": "科研项目",
       "english": "PROJECTS",
-      "description": "",
+      "description": "【示例，仅作展示】复杂动力系统的数据驱动建模与仿真——开展模型构建、数值计算与结果验证。",
       "imageLabels": [
         "项目主图",
         "模型结构图",
@@ -440,7 +448,7 @@
       "homeAnchor": "outcomes",
       "title": "荣誉与获奖",
       "english": "AWARDS",
-      "description": "",
+      "description": "【示例，仅作展示】某项数值计算研究成果获得校级科研成果奖。",
       "imageLabels": [
         "获奖现场照片",
         "证书或奖牌",
@@ -520,7 +528,7 @@
       "homeAnchor": "news",
       "title": "最新论文与研究进展",
       "english": "RESEARCH UPDATES",
-      "description": "",
+      "description": "【示例，仅作展示】完成某数值模型的初步验证，并整理阶段性研究结果。",
       "imageLabels": [
         "论文封面",
         "研究图像",
@@ -595,5 +603,49 @@
       "rows": []
     }
   ],
-  "customSections": []
+  "customSections": [
+    {
+      "id": "education",
+      "title": "人才培养",
+      "english": "",
+      "intro": "",
+      "body": "",
+      "image": "",
+      "items": [],
+      "subsections": [
+        {
+          "id": "education-courses",
+          "title": "教学课程",
+          "body": "教学课程覆盖本科生、硕士研究生和博士研究生三个培养层次。\n\n## 本科生课程\n\n- 《数值计算方法》\n- 《微分方程数值解》\n- 《数学建模公选课》\n- 《概率论与数理统计》\n\n## 硕士研究生课程\n\n- 《高等数值分析》\n- 《科学计算》\n- 《随机动力系统》\n- 《统计软件与计算》\n- 《微分方程数值解》\n\n## 博士研究生课程\n\n- 《纺织材料性能模拟计算》",
+          "image": "",
+          "url": "",
+          "items": []
+        },
+        {
+          "id": "education-student-awards",
+          "title": "学生获奖",
+          "body": "【示例，仅作展示】某同学参加全国大学生数学建模竞赛，获得省级二等奖。",
+          "image": "",
+          "url": "",
+          "items": []
+        },
+        {
+          "id": "education-graduate-destinations",
+          "title": "毕业生去向",
+          "body": "【示例，仅作展示】某同学硕士毕业后，进入某高校继续攻读博士学位。",
+          "image": "",
+          "url": "",
+          "items": []
+        },
+        {
+          "id": "education-teaching-awards",
+          "title": "教学获奖",
+          "body": "【示例，仅作展示】某教师主持的数值计算课程建设项目获得校级教学成果奖。",
+          "image": "",
+          "url": "",
+          "items": []
+        }
+      ]
+    }
+  ]
 }

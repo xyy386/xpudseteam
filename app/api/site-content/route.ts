@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { isSiteEditor } from "../../editor-auth";
 import { getEditorIdentity } from "../../editor-credentials";
 import { getSiteContent, type SiteContent } from "../../content";
+import { findPublicationValidationError } from "../../publication-links";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,8 @@ export async function POST(request: Request) {
     }
     const stored = await getSiteContent();
     if (content.revision !== stored.revision) return Response.json({ error: "网站内容已被其他成员更新，请核对合并结果。", current: stored }, { status: 409 });
+    const publicationError = findPublicationValidationError(content.archives);
+    if (publicationError) return Response.json({ error: publicationError.message }, { status: 400 });
     const oldArticles = new Map(stored.archives.flatMap((archive) => archive.newsArticles.map((article) => [article.id, article] as const)));
     for (const archive of content.archives) for (const article of archive.newsArticles ?? []) {
       const previous = oldArticles.get(article.id);

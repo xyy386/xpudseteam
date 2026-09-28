@@ -10,7 +10,7 @@ export default async function EditorSyncPage() {
   const identity = await getEditorIdentity();
   const environment = syncEnvironment();
   if (identity?.role !== "owner") return <main className="editor-auth-page"><section className="editor-auth-card">
-    <h1>仅管理员可同步网站</h1><a href="/editor-login">返回登录</a>
+    <h1>仅管理员可同步网站</h1><a href="/login">返回登录</a>
   </section></main>;
   const hasOnlineBase = environment === "online" || Boolean((await getSiteContent()).syncBaseRevision);
   return <main className="editor-auth-page"><section className="editor-auth-card editor-sync-card">

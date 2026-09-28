@@ -29,7 +29,7 @@ export const members = [
   },
   {
     name: "郭琴",
-    role: "讲师 · 博士",
+    role: "讲师 · 博士 · 博士生导师",
     focus: "随机动力学、网络动力学、深度学习",
     url: "https://math.xpu.edu.cn/info/1203/4496.htm",
     photo: "/members/guo.jpg",

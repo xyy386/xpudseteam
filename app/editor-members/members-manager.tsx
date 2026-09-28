@@ -50,7 +50,7 @@ export default function MembersManager() {
       <label>授权天数<input type="number" min={1} max={365} value={days} onChange={(event) => setDays(Number(event.target.value))} /></label>
       <button type="submit" disabled={busy}>创建临时账号</button>
     </form>
-    {secret && <div className="editor-issued-secret" role="status"><strong>仅显示一次：{secret.email}</strong><code>{secret.password}</code><button type="button" onClick={() => void navigator.clipboard.writeText(`编辑地址：${window.location.origin}/editor-login\n邮箱：${secret.email}\n初始密码：${secret.password}`)}>复制登录信息</button><button type="button" onClick={() => setSecret(null)}>已保存，关闭</button></div>}
+    {secret && <div className="editor-issued-secret" role="status"><strong>仅显示一次：{secret.email}</strong><code>{secret.password}</code><button type="button" onClick={() => void navigator.clipboard.writeText(`编辑地址：${window.location.origin}/login\n邮箱：${secret.email}\n初始密码：${secret.password}`)}>复制登录信息</button><button type="button" onClick={() => setSecret(null)}>已保存，关闭</button></div>}
     {message && <p role="status">{message}</p>}
     <div className="editor-member-list">{members.length === 0 ? <p>暂无临时成员。</p> : members.map((member) => <article key={member.id}>
       <div><strong>{member.email}</strong><small>{member.revokedAt ? "已撤销" : member.expiresAt <= Date.now() ? "已过期" : "有效"} · 截止 {new Date(member.expiresAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" })}</small></div>

@@ -1,0 +1,102 @@
+/* Shared public and editor overviews; detail pages keep their existing styles. */
+.people-overview {
+  container: people-overview / inline-size;
+  background: #fff;
+  color: #303840;
+  font-family: var(--site-body-font);
+  font-size: var(--site-body-size);
+  line-height: var(--site-line-height);
+}
+.people-overview-inner {
+  width: min(calc(100% - 64px), 1280px);
+  min-width: 0;
+  margin-inline: auto;
+  padding-block: 38px 48px;
+  overflow-wrap: anywhere;
+}
+.people-overview-heading { margin-bottom: 32px; }
+.people-overview-heading h1 {
+  margin: 0;
+  color: #234f83;
+  font-family: var(--site-heading-font);
+  font-size: var(--site-section-title-size);
+  font-weight: 600;
+  line-height: 1.45;
+}
+.people-overview-heading > .markdown-content { margin-top: 14px; color: #64707c; }
+.people-overview .markdown-content { min-width: 0; max-width: 100%; font: inherit; }
+.people-overview .markdown-content > :last-child { margin-bottom: 0; }
+.people-overview .markdown-table-scroll { max-width: 100%; overflow-x: auto; }
+.people-overview .markdown-content :is(pre, img) { max-width: 100%; }
+.people-overview .markdown-content pre { overflow-x: auto; }
+.people-overview-empty { margin: 0; color: #64707c; }
+.people-overview a { color: #234f83; }
+.people-overview a:hover { text-decoration: underline; text-underline-offset: 4px; }
+.people-overview :is(a, button):focus-visible { outline: 2px solid #234f83; outline-offset: 4px; }
+.people-overview :is(.team-profile, .research-card).is-editing { outline: 2px solid #9baec5; outline-offset: 6px; }
+.people-overview-edit { padding: 0; border: 0; background: transparent; color: #234f83; font: inherit; cursor: pointer; text-align: left; }
+.people-overview-edit:hover { text-decoration: underline; text-underline-offset: 4px; }
+.editor-live-stage:not(.is-mobile) > .editor-live-site:has(> .people-overview) { max-width: 1280px; }
+
+.team-directory { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); column-gap: 24px; row-gap: 32px; }
+.team-profile { display: flex; flex-direction: column; min-width: 0; font-size: var(--site-member-text-size); }
+.team-profile-photo {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: min(100%, 160px);
+  height: var(--site-member-photo-height);
+  margin-inline: auto;
+  overflow: hidden;
+  background: #f5f6f8;
+  color: #64707c;
+}
+.team-profile-photo img { display: block; width: 100%; height: 100%; object-fit: var(--site-image-fit); object-position: center 22%; }
+.team-profile-identity { margin-top: 20px; text-align: center; }
+.team-profile h2 { margin: 0; color: #234f83; font-family: var(--site-heading-font); font-size: 22px; font-weight: 600; line-height: 1.5; }
+.team-profile-role { margin: 6px 0 0; color: #64707c; }
+.people-overview .team-profile-focus { margin-top: 18px; font-size: inherit; text-align: left; }
+.people-overview .team-profile-focus :is(ul, ol) { margin-block: 0; padding-left: 1.25em; }
+.people-overview .team-profile-focus li + li { margin-top: 6px; }
+.people-overview .team-profile-focus li::marker { color: #8292a4; }
+.team-profile-actions { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: auto; padding-top: 20px; font-size: 13px; }
+
+.research-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 40px; row-gap: 32px; }
+.research-card { min-width: 0; border: 1px solid #d9dfe6; background: #fff; }
+.research-card-image {
+  display: block;
+  width: 100%;
+  height: var(--site-direction-image-height);
+  padding: 0;
+  border: 0;
+  background: #f5f6f8;
+  cursor: pointer;
+}
+.research-card-image img { display: block; width: 100%; height: 100%; object-fit: var(--site-image-fit); }
+.research-card-copy { min-width: 0; padding: 24px; font-size: var(--site-direction-text-size); }
+.research-card-heading { display: flex; align-items: baseline; gap: 16px; margin-bottom: 18px; padding-bottom: 12px; border-bottom: 1px solid #c6d2e0; }
+.research-card-heading h2 { flex: 1; min-width: 0; margin: 0; color: #234f83; font-family: var(--site-heading-font); font-size: clamp(21px, calc(var(--site-section-title-size) * .72), 27px); font-weight: 600; line-height: 1.5; }
+.research-card-heading :is(a, button) { padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; text-decoration: none; cursor: pointer; }
+.research-card-heading :is(a, button):hover { color: #173b66; text-decoration: underline; text-underline-offset: 4px; }
+.research-card-heading .research-card-more { flex-shrink: 0; color: #64707c; font-size: 14px; white-space: nowrap; }
+
+@container people-overview (max-width: 1120px) {
+  .team-directory { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@container people-overview (max-width: 760px) {
+  .people-overview-inner { width: calc(100% - 36px); padding-block: 28px 36px; font-family: var(--site-mobile-body-font); font-size: var(--site-mobile-body-size); line-height: var(--site-mobile-line-height); }
+  .people-overview-heading { margin-bottom: 26px; }
+  .people-overview-heading h1 { font-family: var(--site-mobile-heading-font); font-size: var(--site-mobile-section-title-size); }
+  .team-directory { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .team-profile { font-size: var(--site-mobile-member-text-size); }
+  .team-profile-photo { height: var(--site-mobile-member-photo-height); }
+  .team-profile h2 { font-family: var(--site-mobile-heading-font); font-size: 21px; }
+  .research-card-grid { grid-template-columns: minmax(0, 1fr); }
+  .research-card-image { height: var(--site-mobile-direction-image-height); }
+  .research-card-copy { padding: 20px; font-size: var(--site-mobile-direction-text-size); }
+  .research-card-heading h2 { font-family: var(--site-mobile-heading-font); font-size: clamp(20px, calc(var(--site-mobile-section-title-size) * .78), 25px); }
+  .team-profile-photo img, .research-card-image img { object-fit: var(--site-mobile-image-fit); }
+}
+@container people-overview (max-width: 520px) {
+  .team-directory { grid-template-columns: minmax(0, 1fr); }
+}

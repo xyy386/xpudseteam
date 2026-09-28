@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 export default async function EditorAiPage() {
   const identity = await getEditorIdentity();
   if (identity?.role !== "owner") return <main className="editor-auth-page"><section className="editor-auth-card">
-    <h1>仅管理员可使用起草助手</h1><a href="/editor-login">返回登录</a>
+    <h1>仅管理员可使用起草助手</h1><a href="/login">返回登录</a>
   </section></main>;
   return <main className="editor-auth-page"><section className="editor-auth-card editor-ai-card">
     <a href="/edit" className="editor-auth-home">← 返回编辑器</a>

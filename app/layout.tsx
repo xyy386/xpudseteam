@@ -1,6 +1,12 @@
 import type { Metadata } from "next";
 import "katex/dist/katex.min.css";
 import "./globals.css";
+import "./academic.css";
+import "./home.css";
+import "./contact.css";
+import "./education.css";
+import "./people-overviews.css";
+import "./detail-pages.css";
 
 export const metadata: Metadata = {
   title: "数据驱动的科学工程建模与计算团队",

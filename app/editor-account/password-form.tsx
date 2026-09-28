@@ -22,6 +22,6 @@ export default function PasswordForm() {
     <label>当前密码<input type="password" autoComplete="current-password" required value={current} onChange={(event) => setCurrent(event.target.value)} /></label>
     <label>新密码（至少 12 位）<input type="password" autoComplete="new-password" minLength={12} maxLength={128} required value={next} onChange={(event) => setNext(event.target.value)} /></label>
     <button type="submit" disabled={busy}>{busy ? "更新中…" : "更新密码"}</button>
-    {message && <p role="status">{message} <a href="/editor-login">返回登录</a></p>}
+    {message && <p role="status">{message} <a href="/login">返回登录</a></p>}
   </form>;
 }
